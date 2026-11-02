@@ -477,3 +477,13 @@ doc_env/
 # application data
 ktem_app_data/
 gradio_tmp/
+
+# Local evaluation workspace
+.env
+.env.*
+!.env.example
+.venv/
+ktem_app_data/
+data/raw/
+data/documents/
+results/
