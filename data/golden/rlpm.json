@@ -1,0 +1,390 @@
+[
+  {
+    "id": "RLPM-01",
+    "question": "Give the exact numerical values of ω₁, ω₂, and ω₃.",
+    "golden_answer": "Neither paper reports exact values for ω₁, ω₂ or ω₃, and no per-benchmark values are given. They are the positive coefficients that weight the three reward terms: the placement and schedule-time term, the bounding-box-area term, and the routing-aware overlap term. The original RLPM paper says they are positive integers. For its seven testcases it gives bounds of 1 ≤ ω₁ ≤ 20, 1 ≤ ω₂ ≤ Σ|Mⱼ| (the total module area from the module binding) and 1 ≤ ω₃ ≤ 5. The later paper gives no numeric bounds and only describes priority orderings. If scheduling time is the main concern, ω₁ > ω₃ > ω₂. If a smaller chip area matters most, ω₂ > ω₃ > ω₁. If routing-aware placement matters most, ω₃ > ω₁ > ω₂. Both papers say the values are to be finalized after some iterations, but the final choices are not reported. The scheduling weights 0.4, 0.3 and 0.3 are a different set, used in the module-priority score, and are not reward weights.",
+    "required_points": "(1) States that exact values are not reported in either paper. (2) Gives the P1 bounds 1–20, 1–Σ|Mⱼ| and 1–5. (3) Gives the P2 priority orderings. (4) Notes the weights are positive, and integers in P1. (5) Does not invent values or confuse them with the 0.4/0.3/0.3 scheduling weights.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.513 §4.1.4 (reward equation, positive integer ωᵢ, \"to be finalized\"); p.513 §5 (coefficient bounds). P2: 6:11 §4.1.4 (reward equation and priority orderings); 6:17–18 §7 hyperparameter list (no ω values); 6:7 §3.2.2 (0.4/0.3/0.3 are scheduling weights)."
+  },
+  {
+    "id": "RLPM-02",
+    "question": "How is a unit cell defined in the different reinforcement learning-based scheduling and placement algorithms?",
+    "golden_answer": "The papers define a unit cell only for RLPM, and the two papers define it identically. A unit cell is 2 × 2 micro-electrodes, which is 4 micro-electrodes. A unit droplet (volume 1) occupies a unit cell so that no other droplet can share it, and the volume of a unit droplet is the capacity of a unit cell. Larger droplets (volume 2–4 and 5–8) are treated as reference blocks of 2 × 2 and 3 × 3 unit cells respectively. Module dimensions in the module library are given in unit cells. No other RL scheduling or placement algorithm is described with its own unit-cell definition. The other RL methods mentioned (in P2's related work) are routing methods, and their unit-cell definitions are not given.",
+    "required_points": "(1) Says the unit cell is defined only for RLPM, and that no other RL scheduling or placement algorithm's definition is given. (2) Gives 2 × 2 micro-electrodes (4 micro-electrodes). (3) Says a unit droplet fills one unit cell. (4) Mentions the reference blocks for larger droplet volumes. (5) Does not invent unit-cell definitions for other methods.",
+    "question_type": "Ambiguous reference (partial)",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.510 §3.1 (unit cell, reference block); p.511 Table 1 (sizes in unit cells). P2: 6:5–6:6 §3.1 and Fig. 3(b); 6:7 Table 1; 6:17 §7 (unit cell 2 × 2 micro-electrodes); 6:4–6:5 §2.2 (RL routing works cited, no unit-cell definitions)."
+  },
+  {
+    "id": "RLPM-03",
+    "question": "How can I reconstruct the three synthetic benchmark graphs used in RLPM?",
+    "golden_answer": "The premise is wrong. RLPM uses four synthetic benchmarks, not three. Of its seven testcases, T1–T3 are real-life bioprotocols (PCR with 7 operations and 6 edges, IVD with 12 and 6, CPA with 55 and 54), taken from a 2012 DTU thesis by Minhass. T4–T7 are synthetic: Synthetic Benchmark I (10 operations, 9 edges), II (20, 19), III (30, 29) and IV (9 operations, 10 edges). The papers give only the operation and edge counts, not node types, topology, edge weights, volumes, module binding or durations, so none of the graphs can be reconstructed from the papers alone. Only Benchmark IV (T7) has a source: Kundu et al. 2021, \"Mixing models as integer factorization: a key to sample preparation with microfluidic biochips\" (IEEE TCAD 41(3), 558–570). P2 points to Figure 9(b) of that work. No citation is given for Benchmarks I–III.",
+    "required_points": "(1) Corrects \"three\" to four synthetic benchmarks (T4–T7). (2) Says the papers give only operation and edge counts, with no graph structure. (3) Gives the T7 source, the Kundu et al. 2021 IEEE TCAD paper (Fig. 9(b) in P2). (4) Says T4–T6 have no source. (5) Notes T1–T3 are real-life, with the Minhass 2012 thesis as the source.",
+    "question_type": "False premise",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "P1: p.513 §5 (testcase list with counts, [7] for T7, [9] for T1–T3); p.514 refs [7], [9]. P2: 6:18 Table 2 (T7 = \"Figure 9(b) in [21]\"); 6:24 refs [21], [27]."
+  },
+  {
+    "id": "RLPM-04",
+    "question": "Are guard rings used in RLPM?",
+    "golden_answer": "It depends on which paper. The original RLPM paper never mentions guard rings. Its placement constraints are only that modules lie within the grid, that no active cell be used by more than one module at a time, and that every cell's overlap value stay between 0 and α. The later RLPM + CAMR paper does model guard rings. It defines two around each module: a first ring one micro-electrode wide, used in the placement phase (RLPM's phase), and a second ring two micro-electrodes wide, used in the routing phase (CAMR). So guard rings are part of the later paper's chip model, with a 1-micro-electrode ring for placement. That paper does not spell out how the ring enters RLPM's action legality, overlap counts or reward. It also later describes the ring as \"padding of unit-cells,\" and the width wording is not reconciled.",
+    "required_points": "(1) Says P1 does not mention guard rings. (2) Says P2 includes a 1st guard ring of one micro-electrode for the placement phase. (3) Mentions the 2nd ring of two micro-electrodes for routing. (4) Says P2 does not detail how the ring affects RLPM's legal actions or reward.",
+    "question_type": "Consistency check across papers",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "P1: pp.509–513, no guard-ring mention; constraints on p.512 §4.1.1. P2: 6:5 §3.1 and 6:6 Fig. 3(a) (two guard rings); 6:13 §5 (\"padding of unit-cells\"); constraints at 6:9 §4.1.1."
+  },
+  {
+    "id": "RLPM-05",
+    "question": "Are guard-ring cells included when calculating overlap between modules in RLPM?",
+    "golden_answer": "This is not specified. In both papers, overlap is defined over a module's active cells. uₓ,ᵧ is the number of modules overlapping a cell, bounded by α, and Cᵢ,ⱼ = |Aᵢ ∩ Aⱼ| counts overlapping cells between parent and child operations. Neither paper says guard-ring cells belong to Aᵢ or are counted in these quantities. The original paper has no guard rings, and the later paper introduces one for placement without saying whether it counts toward overlap. The question cannot be answered from the papers.",
+    "required_points": "(1) Says it is not specified. (2) States how overlap is defined (active cells Aᵢ, uₓ,ᵧ ≤ α, Cᵢ,ⱼ). (3) Notes P1 has no guard rings. (4) Does not assert inclusion or exclusion.",
+    "question_type": "Unanswerable",
+    "answerability": "Absent",
+    "difficulty": "Hard",
+    "evidence": "P1: p.512 §4.1.1; p.513 §4.1.4 (Cᵢ,ⱼ). P2: 6:9 §4.1.1 (uₓ,ᵧ, constraints); 6:11 §4.1.4 (Cᵢ,ⱼ); 6:5 §3.1 (guard rings, no overlap link)."
+  },
+  {
+    "id": "RLPM-06",
+    "question": "Give the exact numerical values of μ₁ and μ₂.",
+    "golden_answer": "The papers do not give numerical values for μ₁ and μ₂. They give only constraints. Both are positive integers with μ₁ > μ₂, and their product μ₁μ₂ equals the sum over the module binding of the module areas |Mⱼ|. This is an estimate of the total module area. They appear in the area term F₂ = μ₁ − 2𝓑/μ₂, which is larger when the bounding-box area 𝓑 is smaller. The product does not determine a unique pair, and no rule for choosing the factors is given.",
+    "required_points": "(1) Says exact values are not reported. (2) States both are positive integers with μ₁ > μ₂. (3) States μ₁μ₂ = Σ|Mⱼ| over the module binding. (4) Gives the F₂ role. (5) Notes the factor choice is unspecified.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.513 §4.1.4. P2: 6:11 §4.1.4."
+  },
+  {
+    "id": "RLPM-07",
+    "question": "What input is supplied to the Q-network in RLPM, and how is that input constructed from the environment?",
+    "golden_answer": "The state is a three-element tuple <𝓑, x, y>. 𝓑 is the current bounding-box area, meaning the area of the smallest rectangle containing all modules placed so far. (x, y) is the position of the last module placed on the chip. The network has three input neurons for this state, two hidden layers of 256 and 128 neurons, and one output neuron. For each module to be placed, RLPM enumerates all candidate actions \\<x, y, φ>. The network is evaluated once per state–action pair (a copy per action) to give a Q-value, and the maximum is chosen. The papers do not say how the action is encoded into the network, nor whether inputs are normalized. The state tuple does not explicitly include the identity of the next module or the time-stamp. The papers mention richer alternatives (a full grid image, or 𝓑 plus all placed positions) but do not use them.",
+    "required_points": "(1) Gives <𝓑, x, y>. (2) Defines 𝓑 as the current bounding-box area and (x, y) as the last placed module's position. (3) Gives 3 inputs, hidden layers of 256 and 128, and 1 output. (4) Notes Q-values are computed per candidate action. (5) Notes the action encoding is unspecified.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "P1: p.512 §4.1.2–4.1.3 and Fig. 4. P2: 6:9 §4.1.2; 6:10 §4.1.3; 6:11 Fig. 6."
+  },
+  {
+    "id": "RLPM-08",
+    "question": "Give the exact optimization problem RLPM solves, including its objectives, constraints, reward function, and individual objective terms.",
+    "golden_answer": "**Inputs:** a sequencing graph G(V,E), a module library, the binding B̂, the active list L₁ and ready list L₂, and an H × W chip with overlapping constraint α. **Outputs:** the placement and schedule set P̂ = ∪ Place(Oᵢ), where Place(Oᵢ) = \\<Mⱼ, (xᵢ,yᵢ), tsᵢ, teᵢ>. They also include the number of utilized cells U and the bounding-box area 𝓑. **Objectives, subject to α:** (1) minimize the place-and-schedule time T_p = max teᵢ, (2) minimize 𝓑, and (3) maximize the reliability ρ. P1 states these as alternatives (\"or\"), P2 as primary objectives. **Constraints:** modules lie inside the grid; no active cell is used by more than one module at a time (overlap happens only across different time-stamps); 0 ≤ uₓ,ᵧ ≤ α for every cell. **Reward:** R = [ω₁·F₁ + ω₂·F₂ + ω₃·F₃] × 1 / Σ₍ₓ,ᵧ₎ 2^(uₓ,ᵧ − α). **Terms:** F₁ = H/(x² + y² + 1), which is larger toward the top-left corner (0,0) and serves as a proxy for T_p. F₂ = μ₁ − 2𝓑/μ₂ (with μ₁ > μ₂ positive integers, μ₁μ₂ = Σ|Mⱼ|). F₃ = Σ over edges of Cᵢ,ⱼ, where Cᵢ,ⱼ = |Aᵢ ∩ Aⱼ| is the overlap between parent and child modules (a routing-aware term). **Metrics:** U = |∪Aᵢ|; ρ = U / (Σ over uₓ,ᵧ ≤ α of uₓ,ᵧ + Σ over uₓ,ᵧ > α of uₓ,ᵧ²), with ρ in (0,1]; 𝓑 is the minimum rectangle covering U. The agent maximizes R through DQN. The papers do not state a single formal mathematical program. The problem is expressed as a multi-objective formulation scalarized into R, and the constraints are enforced through action legality. P2 also says α is \"not included\" in R, although α appears in R's divisor.",
+    "required_points": "(1) Gives inputs and outputs. (2) Gives the three objectives (min T_p, min 𝓑, max ρ). (3) Gives the three placement constraints. (4) Gives the full reward formula. (5) Gives F₁, F₂, F₃ definitions. (6) Gives ρ and U. (7) Notes there is no single explicit formal program and R is maximized by DQN.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "P1: p.511 §4 (inputs, outputs, objectives); p.512 §4.1.1; p.513 §4.1.4 and §4.2. P2: 6:8 §4 (formulation); 6:9 §4.1.1 (constraints); 6:11 §4.1.4 (F₁–F₃, R); 6:12 §4.2 Eq. (1)–(2); 6:19 §7.1 (α-not-in-reward remark)."
+  },
+  {
+    "id": "RLPM-09",
+    "question": "What random seed is used in RLPM?",
+    "golden_answer": "Neither paper reports a random seed. Both give hyperparameters and hardware, but no seed. P2 reports repeated runs of T7 (Fig. 17) without any seed information.",
+    "required_points": "(1) Says no seed is reported. (2) Does not invent a value.",
+    "question_type": "Unanswerable",
+    "answerability": "Absent",
+    "difficulty": "Easy",
+    "evidence": "P1: p.513 §5 (checked, no seed). P2: 6:17–18 §7 hyperparameter list (checked, no seed); 6:19 §7.1 (repeated runs)."
+  },
+  {
+    "id": "RLPM-10",
+    "question": "What is the initial environment state at the start of each episode in RLPM?",
+    "golden_answer": "The papers do not define the initial <𝓑, x, y> state or an explicit episode-reset procedure. What they describe is the synthesis-level initialization. The active list L₁ starts empty, and the ready list L₂ is filled with the leaf operation nodes of G, with their module bindings, sorted in descending order of the priority score S(Oᵢ). The chip is an H × W grid with constraint α, and ε starts at 1. By inference, no module is placed at the start, so overlap values are zero and the bounding box is empty. How <𝓑, x, y> is defined before the first placement is not stated.",
+    "required_points": "(1) Says the initial state tuple is not specified. (2) States L₁ empty and L₂ holding the leaf nodes sorted by S(Oᵢ). (3) Labels \"no modules placed, u = 0\" as inference. (4) Does not invent an initial 𝓑, x, y.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.511 §3.2.2 (lists); p.512 §4.1.2. P2: 6:7 §3.2.2; 6:9 §4.1.2; 6:17 §7 (ε = 1)."
+  },
+  {
+    "id": "RLPM-11",
+    "question": "Is RLPM training instance specific, or is a shared model trained across benchmarks?",
+    "golden_answer": "The papers do not say explicitly. The evidence points to instance-specific training, which is an inference. Training curves are shown per testcase, and for smaller testcases the authors say the number of training episodes can be reduced. Computation time is said to depend on chip size, number of mixers and number of edges. Runs also vary the chip size and the overlap constraint α (for example α = 2 and 3). No cross-benchmark or shared-model training is described. Note that \"agent\" in the papers means the module being placed, not a separately trained model per benchmark.",
+    "required_points": "(1) Says it is not stated explicitly. (2) Gives the evidence for per-testcase training (per-testcase curves, fewer episodes for small cases, time depends on instance). (3) Labels the conclusion as inference. (4) Notes no shared-model training is described. (5) Notes \"agent\" means the module.",
+    "question_type": "Partial information (inference)",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.512 §4.1.1 (agent = module); p.513 §5 and Fig. 6. P2: 6:18 §7 (reduce episodes for smaller testcases); 6:18–19 §7.1 and Figs. 13, 16, 17; 6:19 (computation time)."
+  },
+  {
+    "id": "RLPM-12",
+    "question": "What claims does RLPM make about generalization to unseen bioassays, and what experiments support those claims?",
+    "golden_answer": "Neither paper claims generalization to unseen bioassays, and no experiment tests it. There are no held-out bioprotocols. The papers claim that RLPM works efficiently on each of seven testcases, which are real-life and synthetic, and that it converges consistently across repeated runs on T7. They also say it can help run multiple bioprotocols in parallel on a chip. P2 acknowledges the simple state representation suits non-complex bioassays and that complex cases may need other state designs. Future work mentions more general module shapes.",
+    "required_points": "(1) Says no generalization claim and no unseen-bioassay experiment. (2) Mentions the per-testcase effectiveness claims. (3) Mentions the repeated-run consistency on T7. (4) Does not present these as generalization.",
+    "question_type": "False premise",
+    "answerability": "Absent",
+    "difficulty": "Hard",
+    "evidence": "P1: p.513 §5; p.514 §6. P2: 6:9–6:10 §4.1.2; 6:18–19 §7.1; 6:21 Figs. 16–17; 6:23 §8."
+  },
+  {
+    "id": "RLPM-13",
+    "question": "How does RLPM select its best model or checkpoint?",
+    "golden_answer": "The selection criterion is not given. The only related detail is that model weights are saved every 1,000 epochs. P2 also says most testcases reach optimal results around 1,400 iterations, while larger testcases may need up to 3,000 to guarantee the best result. Whether the reported placement is the best episode or the final one is not stated.",
+    "required_points": "(1) Says no selection criterion is given. (2) Gives the 1,000-epoch saving interval. (3) Mentions the \\~1,400 / 3,000 iteration remarks. (4) Does not invent a criterion.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.513 §5 (nothing reported). P2: 6:17–18 §7 item (viii); 6:19 §7.1."
+  },
+  {
+    "id": "RLPM-14",
+    "question": "Does RLPM specify the initial dispense volumes of its T8 benchmark?",
+    "golden_answer": "The premise is false. RLPM has no T8; its testcases are T1–T7. Initial dispense volumes (reagent droplet volumes) are not specified for any benchmark. The testcase table gives only operation and edge counts. Reagent volumes appear only as edge weights in the illustrative example graph, and the droplet sizes in the routing comparison belong to CAMR experiments.",
+    "required_points": "(1) Says there is no T8, only T1–T7. (2) Says dispense volumes are not given for any benchmark. (3) Does not invent volumes.",
+    "question_type": "False premise",
+    "answerability": "Absent",
+    "difficulty": "Hard",
+    "evidence": "P1: p.513 §5. P2: 6:18 Table 2; 6:4 Fig. 2(b); 6:23 Table 5."
+  },
+  {
+    "id": "RLPM-15",
+    "question": "In what units are chip size, module dimensions, and module capacity reported in RLPM?",
+    "golden_answer": "Chip size H × W is a grid in which each cell is one micro-electrode. Module dimensions h × w are in unit cells, where a unit cell is 2 × 2 micro-electrodes. Module capacity is in unit volumes, where one unit volume is a unit droplet that occupies a unit cell's capacity. Droplet volumes range from 1 to 8 unit volumes. Operation times are in unit time (P2 gives an example of a 3 × 3 SAR-laminar mixer taking three unit times). Utilized cells U and bounding-box area 𝓑 are counted in cells. The papers do not explicitly say how module unit-cell sizes are converted to grid cells when computing |Mⱼ|, U and 𝓑 (for example, Fig. 4 labels modules like 4 × 4 directly on the grid).",
+    "required_points": "(1) Chip size in micro-electrodes (grid cells). (2) Module size in unit cells (2 × 2 micro-electrodes). (3) Capacity in unit volumes. (4) Notes the conversion for area counting is not explicit.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "P1: p.510 §3.1; p.511 Table 1; p.512 Fig. 2. P2: 6:5 §3.1; 6:7 Table 1; 6:9 Fig. 4; 6:17."
+  },
+  {
+    "id": "RLPM-16",
+    "question": "Explain the loss function used by RLPM.",
+    "golden_answer": "The loss function is not specified in either paper. RLPM is described as a DQN-based method citing Mnih et al., but no loss (for example, TD-error form, MSE or Huber) is stated. What is reported is batch size 128, replay buffer 30,000, discount factor 0.9, target-network update every 15 epochs or steps, and a stated \"learning rate\" of 0.9. Assuming the standard DQN loss would be an inference.",
+    "required_points": "(1) Says no loss function is specified. (2) Does not describe or assume a particular loss as fact. (3) Optionally notes the DQN citation and hyperparameters reported.",
+    "question_type": "Unanswerable",
+    "answerability": "Absent",
+    "difficulty": "Medium",
+    "evidence": "P1: p.511 §4; p.513 §5 (no loss). P2: 6:17–18 §7 hyperparameters (no loss)."
+  },
+  {
+    "id": "RLPM-17",
+    "question": "Does RLPM provide pseudocode for its algorithm?",
+    "golden_answer": "No. RLPM is described through prose, the DQN diagram, the formulation and equations. P2 provides flowcharts for CAMR and the overall design flow, not for RLPM.",
+    "required_points": "(1) Answers no. (2) Notes the description is prose, equations and diagrams.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Easy",
+    "evidence": "P1: pp.511–513 (no algorithm listing). P2: 6:15 Fig. 10 (CAMR flowchart); 6:17 Fig. 12 (design flow)."
+  },
+  {
+    "id": "RLPM-18",
+    "question": "Are the benchmark results reported by RLPM and CAMR internally consistent within their respective papers? Identify any discrepancies.",
+    "golden_answer": "Largely consistent in the tables, with several discrepancies. **Consistent:** the average improvements recompute from the per-testcase percentages. These are 23.45% and 28.60% for utilized cells versus HSM and WLSM, and 27.63% and 32.49% for bounding-box area. The P2 Table 4 averages and improvement percentages recompute from the rows. The seven RLPM utilized-cell values match between Tables 3 and 4, and P1 and P2 give identical per-testcase numbers. **Discrepancies:** (1) T7 run setup. The P2 text says T7 on a 15 × 15 chip, five runs, 3,000 iterations. The Fig. 17 caption says ten runs on a 10 × 10 chip, and the plotted axis spans 0–100. Bounding-box values near 144–220 exceed a 100-cell chip, so the caption's chip size looks wrong (inference). (2) T7 and T4 bounding-box values. Figs. 16–17 show converged 𝓑 of about 144–180 for T7 and about 180 for T4 on a 15 × 15 chip with α = 2. Figs. 14 and 18 show about 285–300 for T4 at α = 2 on larger chips (read approximately from the plots). Tables 3 and 4 give RLPM 𝓑 = 768 (U = 492) for T7 and 𝓑 = U = 560 for T4. Table 3 does not state α and uses different chip sizes, so this is unreconciled, and a unit difference may be involved but is not stated. P1 shows the same T4 pattern between Fig. 7 and its Table 2. (3) Percentage arithmetic. For T1 the HSM utilized-cell reduction is printed as 23.44%, but (532 − 412)/532 = 22.56%. The printed 23.44% is what yields the 23.45% average. For T7 the WLSM utilized-cell reduction is printed as 41.76%, but (844 − 492)/844 = 41.71%. (4) P2 text assigns Fig. 14(a) to utilized cells and 14(b) to bounding-box area, but the caption has them reversed. P1 is consistent. (5) Chip sizes for T4. P1's text and Fig. 7(a),(b) use 18 × 13 to 24 × 19, while Fig. 7(c) uses 26 × 36 to 38 × 48. P2 labels the same bars as 26 × 36 to 38 × 48. (6) P2 says no cell reaches u ≥ α = 2, but the constraint allows u = α. (7) The abstract's 28.6% is the utilized-cell reduction versus WLSM only. Versus HSM it is 23.45%. In Table 4, RLPM + CAMR does not improve every metric on every testcase. For example, on T4 its routing cost and length are higher than both baselines.",
+    "required_points": "(1) Answers that results are not fully consistent. (2) Notes the aggregate tables recompute. (3) Identifies the T7 Fig. 17 text/caption mismatch (runs and chip size). (4) Identifies the T4/T7 bounding-box mismatch between figures and tables. (5) Identifies the T1 22.56% vs 23.44% and T7 41.71% vs 41.76% arithmetic. (6) Identifies the P2 Fig. 14(a)/(b) swap. (7) Notes anything unreconciled is not resolved from the papers.",
+    "question_type": "Consistency check",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "P1: p.514 Table 2, Fig. 7, text; p.513 §5. P2: 6:20 Fig. 14 and text; 6:19 §7.1 (Fig. 17 text); 6:21 Figs. 16–18 and captions; 6:22 Tables 3–4."
+  },
+  {
+    "id": "RLPM-19",
+    "question": "Does RLPM use MSE loss or Huber loss?",
+    "golden_answer": "Neither is stated. The papers do not name the loss function.",
+    "required_points": "(1) Says neither MSE nor Huber is specified. (2) Does not guess.",
+    "question_type": "Unanswerable",
+    "answerability": "Absent",
+    "difficulty": "Medium",
+    "evidence": "P1: p.513 §5. P2: 6:17–18 §7."
+  },
+  {
+    "id": "RLPM-20",
+    "question": "Where can I find the synthetic benchmarks used by RLPM?",
+    "golden_answer": "The papers give no download link or repository. The only pointer is for Synthetic Benchmark IV (T7), which comes from Kundu et al. 2021, \"Mixing models as integer factorization: a key to sample preparation with microfluidic biochips\" (IEEE TCAD 41(3), 558–570). P2 refers to Figure 9(b) of that work. Synthetic Benchmarks I–III (T4–T6) have no source. The real-life T1–T3 come from the 2012 DTU thesis by Minhass, but they are not the synthetic benchmarks.",
+    "required_points": "(1) Says no public link or repository is given. (2) Gives the T7 source and the Fig. 9(b) pointer. (3) Says T4–T6 have no source. (4) Distinguishes T1–T3 as real-life with the Minhass source.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.513 §5; p.514 refs [7], [9]. P2: 6:18 Table 2; 6:24 refs [21], [27]."
+  },
+  {
+    "id": "RLPM-21",
+    "question": "How does RLPM handle episodes in which the bioassay gets stuck and cannot proceed?",
+    "golden_answer": "The papers do not describe this. They acknowledge that in early training epochs RLPM may produce solutions that fail to place all modules within the overlap constraint. They track the number of placed modules per epoch to show it improves. Termination rules, penalties, truncation, resets or timeouts for stuck episodes are not specified.",
+    "required_points": "(1) Says no explicit handling is described. (2) Mentions that early failed placements are acknowledged and tracked. (3) Does not invent a mechanism.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "P1: p.513 §5. P2: 6:18 §7.1; 6:21 Fig. 16."
+  },
+  {
+    "id": "RLPM-22",
+    "question": "What exact chip height and width does RLPM use while training on each benchmark?",
+    "golden_answer": "No single training chip size per benchmark is reported. The papers report these chip sizes in different experiments. Figure experiments: T7, T2 and T4 on 15 × 15 with α = 2 (Fig. 16); T7 text says 15 × 15 but its caption says 10 × 10 (Fig. 17); T4 on 30 × 40 with α from 1 to 4 (Fig. 18); T4 on 26 × 36 / 30 × 40 / 34 × 44 / 38 × 48 (P2 Fig. 14), or 18 × 13 to 24 × 19 in P1's Fig. 7(a),(b); T6 in Fig. 13 gives no size. Table 3, the \"sufficiently larger chip\" comparison: T1 28 × 28, T2 34 × 34, T3 70 × 70, T4 32 × 32, T5 40 × 40, T6 54 × 54, T7 34 × 34. Table 4, the smaller chip set to RLPM's bounding box: T1 20 × 22, T2 24 × 32, T3 46 × 60, T4 20 × 28, T5 30 × 40, T6 30 × 54, T7 24 × 32. Whether RLPM was trained on these table sizes is not stated.",
+    "required_points": "(1) Says there is no single per-benchmark training chip size. (2) Gives the Table 3 sizes. (3) Gives the Table 4 sizes. (4) Gives the figure-specific sizes. (5) Notes the T7 text/caption conflict.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.514 Table 2, Fig. 7. P2: 6:21 Figs. 16–18; 6:20 Fig. 14; 6:22 Tables 3–4."
+  },
+  {
+    "id": "RLPM-23",
+    "question": "How does RLPM generate candidate actions and determine which actions are legal at each decision step?",
+    "golden_answer": "At each step RLPM picks the next module from the ready list. It first computes the obstacles at the current time-stamp, which are the union of the active cells of modules currently running. It finds all maximal free rectangles outside the obstacles and merges rectangles that share boundaries into \"maximal rectilinear polygons.\" It then enumerates every top-left position inside those polygons, and for each it tries the module's four rectilinear orientations (rotating up to three times by 90 degrees). Each candidate is an action \\<x, y, φ>, with φ in 0–3 the number of rotations. For example, for a 4 × 2 | 2 × 2 L-shaped module the legal actions are <1,0,2> and <6,6,0> in the figure. Legality means the module lies inside the grid, no active cell is used by more than one module at that time, and each cell's overlap value stays at most α. Cells that reach α act as permanent obstacles. Overlap is allowed across different time-stamps, not simultaneously. The action set changes dynamically, and the Q-network scores each candidate and the highest Q-value is chosen. P1 additionally states that when an operation ends, its cells are freed and the ready list is updated.",
+    "required_points": "(1) Describes obstacles as the union of active cells. (2) Describes maximal rectangles merged into rectilinear polygons. (3) Describes enumerating positions with up to four orientations (φ). (4) Gives the action format \\<x, y, φ>. (5) States the three legality constraints. (6) Notes cells with u = α are permanent obstacles. (7) Notes Q-values choose among the legal actions.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "P1: p.512 §4.1.1–4.1.3, Figs. 2–3. P2: 6:9 §4.1.1 and Fig. 4; 6:10 §4.1.3 and Fig. 5."
+  },
+  {
+    "id": "RLPM-24",
+    "question": "What exact numerical values does RLPM use for the heating and cooling durations, Tₕ and T꜀?",
+    "golden_answer": "No numeric values are reported. In the module library the heating and cooling times are bioprotocol-dependent and predefined in each sequencing graph, and no values for any benchmark are given. As an inference from labels in the illustrative example schedule only, the example's heating operation appears to span time-stamps 8–10 and its cooling operation 4–8. That example is not a benchmark value.",
+    "required_points": "(1) Says exact values are not reported. (2) Says they are predefined per bioprotocol in the sequencing graph. (3) Does not invent benchmark values. (4) Any example reading is flagged as an inference from the illustrative figure.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.511 Table 1 footnote. P2: 6:7 Table 1 footnote; 6:6 §3.1; 6:13 Fig. 8(a)."
+  },
+  {
+    "id": "RLPM-25",
+    "question": "How does RLPM normalize the different objective terms before combining them in its reward function?",
+    "golden_answer": "The papers describe no explicit normalization such as min-max, z-scoring or clipping. The terms are F₁ = H/(x² + y² + 1), F₂ = μ₁ − 2𝓑/μ₂ and F₃ = Σ Cᵢ,ⱼ, combined as a weighted sum with ω₁–ω₃ (with bounds in P1). The sum is multiplied by the factor 1/Σ 2^(u − α). The only scale-related devices are H in F₁, the area-based μ₁ and μ₂ in F₂, the global divisor, and the ω weights, which are balancing weights and not normalization. Whether network inputs are normalized is also not stated.",
+    "required_points": "(1) Says no explicit normalization is described. (2) Lists the scale-related devices without calling them normalization. (3) Notes the ω weights and their bounds. (4) Does not invent a normalization scheme.",
+    "question_type": "Partial information",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "P1: p.513 §4.1.4 and §5. P2: 6:11 §4.1.4."
+  },
+  {
+    "id": "RLPM-26",
+    "question": "What evidence supports RLPM's claim of reaching an optimal solution around the 1400th episode, and how is optimality determined?",
+    "golden_answer": "Only P2 makes this claim. It says most testcases reach optimal results around 1,400 iterations, larger ones may need up to 3,000, and the worst case takes about 1.5 hours. The supporting evidence is empirical. Fig. 17 shows reward and bounding-box-area curves over repeated T7 runs that plateau and converge, and the five run times are 0.8, 1.52, 0.57, 0.86 and 1.32 hours. Fig. 16 shows curves flattening for T7, T2 and T4. The papers do not define optimality, compare against an exact or exhaustive solver, or prove optimality. \"Optimal\" in practice means the converged best reward or bounding-box value. As an inference, the figures' plateau and the end of exploration (ε decay over 1,500 episodes) roughly coincide with \\~1,400, but the papers do not tie the claim to either. The mix of \"iterations,\" \"epochs\" and \"episodes,\" and the figure axes (0–100 in Fig. 17, up to 4,000–6,000 in Fig. 16), are not reconciled with the stated 3,000 episodes.",
+    "required_points": "(1) Attributes the claim to P2 only. (2) Cites the convergence plots and run times as the evidence. (3) Says optimality is not formally defined or verified. (4) Notes the 3,000-iteration remark for larger cases. (5) Labels the link to ε decay as inference.",
+    "question_type": "Synthesis",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "P1: no such claim (p.513 §5). P2: 6:19 §7.1 (claim and run times); 6:21 Figs. 16–17; 6:17 §7 (ε decay over 1,500 epochs)."
+  },
+  {
+    "id": "RLPM-27",
+    "question": "What training, validation, and test split does RLPM use for its benchmark experiments?",
+    "golden_answer": "No split is reported. The seven bioprotocols are called testcases, results are reported per testcase, and there is no validation set or held-out set. As an inference, each instance is used for training and evaluation, since smaller testcases can use fewer training episodes. The repeated runs on T7 test consistency, not generalization.",
+    "required_points": "(1) Says no train/validation/test split is reported. (2) Notes per-testcase use. (3) Labels instance-specific training as inference. (4) Notes the repeated runs are not splits.",
+    "question_type": "False premise",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "P1: p.513 §5. P2: 6:17–18 §7; 6:19 §7.1."
+  },
+  {
+    "id": "RLPM-28",
+    "question": "How much does each reward component contribute to RLPM's performance, according to its reward-weight ablation experiments?",
+    "golden_answer": "The premise is false. Neither paper runs reward-weight or reward-component ablations, so no per-component contribution is reported. What exists is qualitative: Fig. 13 tracks how reward moves with 𝓑, W, P, O and Ô, and compares α = 2 and α = 3. Weights are described only through priority orderings and (in P1) bounds.",
+    "required_points": "(1) Says there is no ablation. (2) Mentions what the papers show instead (Fig. 13 trends, α = 2 vs 3). (3) Does not invent contributions.",
+    "question_type": "False premise",
+    "answerability": "Absent",
+    "difficulty": "Hard",
+    "evidence": "P1: p.513 §5; p.514 Fig. 6. P2: 6:18–19 §7.1 and Fig. 13; 6:11 §4.1.4."
+  },
+  {
+    "id": "RLPM-29",
+    "question": "What optimizer, activation functions, weight decay, and gradient-clipping settings does RLPM use?",
+    "golden_answer": "None of these is specified. What is reported is the network shape (3 inputs, hidden layers of 256 and 128, 1 output) and the hyperparameters: learning rate 0.9, batch size 128, discount factor 0.9, ε from 1 to 0.001 with decay rate 0.0003 over 1,500 epochs, 3,000 episodes, replay buffer 30,000, weights saved every 1,000 epochs, and target-network update every 15 epochs or steps.",
+    "required_points": "(1) Says the four items are not specified. (2) Optionally lists the reported architecture and hyperparameters. (3) Does not guess Adam or ReLU.",
+    "question_type": "Partial information",
+    "answerability": "Absent",
+    "difficulty": "Medium",
+    "evidence": "P1: p.512 §4.1.3; p.513 §5. P2: 6:10 §4.1.3; 6:17–18 §7."
+  },
+  {
+    "id": "RLPM-30",
+    "question": "How does RLPM handle split and filter operations, and which module-library entries implement them?",
+    "golden_answer": "RLPM does not handle split or filter operations. Its sequencing graphs have four operation types, which are mix, heat, cool and detect. The module library has eight entries: M1–M5 for mixing (M3 and M4 are SAR-laminar mixers), M6 for detection, M7 for heating and M8 for cooling. No entry implements a split or filter operation. \"Split\" appears only as a droplet-shape property (a droplet can be split for routing) and in the name of the split-and-recombine mixers, which are mixers. Filter is not mentioned.",
+    "required_points": "(1) Says RLPM does not handle split or filter operations. (2) Lists the four operation types. (3) Lists the module-library entries (M1–M8). (4) Clarifies that \"split\" is a droplet property and part of \"split-and-recombine\" mixer names.",
+    "question_type": "False premise",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "P1: p.510 §3.1; p.511 Table 1 and §3.2.1. P2: 6:5–6:7 §3.1, Table 1; 6:7 §3.2.1; 6:3 §2.1."
+  },
+  {
+    "id": "RLPM-31",
+    "question": "Does RLPM require a guard ring between a module and the chip boundary, and can adjacent modules share guard-ring cells?",
+    "golden_answer": "Neither is specified. The original paper has no guard rings. The later paper defines a first guard ring around each module for placement but says nothing about requiring it against the chip boundary or about adjacent modules sharing ring cells. The only stated placement constraint about the boundary is that modules lie inside the H × W grid.",
+    "required_points": "(1) Says both points are unspecified. (2) Notes P1 has no guard rings. (3) Notes P2 defines the ring but not boundary or sharing rules. (4) Notes the in-grid constraint is the only boundary rule.",
+    "question_type": "Unanswerable",
+    "answerability": "Absent",
+    "difficulty": "Hard",
+    "evidence": "P1: pp.510–513 (no guard-ring mention). P2: 6:5 §3.1; 6:6 Fig. 3(a); 6:9 §4.1.1."
+  },
+  {
+    "id": "RLPM-32",
+    "question": "How does RLPM assign modules to operations, and how does it then decide the order in which operations are handed to the placer?",
+    "golden_answer": "Module assignment is a static binding done before placement. The binding runs iteratively: at each iteration it takes all the leaf operation nodes of the sequencing graph, binds a module from the module library to each, and removes those nodes from the graph. For mix operations with input size of 4 or less, the module priority order is M3, M2, M5, M1. Mix operations with input size above 4 get M4. Except for M1 and M4, at most two consecutive instances of M2, M3 or M5 may be used. The library also contains one detector (M6), one heater (M7) and one cooler (M8) for the other three operation types. Each operation is tagged (Oᵢ, Mⱼ, Tᵢ), with Tᵢ its operation time. Ordering uses two lists. The active list L₁ starts empty. The ready list L₂ is filled with the bindings of the leaf nodes, sorted in descending order of the priority score S(Oᵢ) = α₁/(h̃ − ℓᵢ) + α₂/|Mⱼ| + α₃/Tᵢ. Here h̃ is the height of the graph and ℓᵢ is the node's level, and the weights are α₁ = 0.4, α₂ = 0.3 and α₃ = 0.3 (summing to 1). This favours operations at lower depth, with smaller modules and shorter times, so that several modules can be placed at once. The placer takes modules from L₂. After RLPM places an operation's module, its binding moves from L₂ to L₁ and L₂ is updated with the bindings of that operation's child nodes. P1 also says the cells are freed and L₂ is updated when an operation ends, and the papers do not reconcile the two timings.",
+    "required_points": "(1) Says binding is static and iterative over leaf nodes. (2) Gives the mix-module priority rules (M3, M2, M5, M1 for inputs ≤ 4; M4 above 4; max two consecutive M2/M3/M5). (3) Gives the S(Oᵢ) formula with weights 0.4/0.3/0.3. (4) Says L₂ is sorted in descending S(Oᵢ) and L₁ starts empty. (5) Says placed operations move from L₂ to L₁ and children are added to L₂.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Easy",
+    "evidence": "P1: p.511 §3.2.1–3.2.2 and Table 1; p.512 §4.1.2 (list update at operation end). P2: 6:7 §3.2.1–3.2.2 and Table 1."
+  },
+  {
+    "id": "RLPM-33",
+    "question": "Walk through how RLPM picks a location and orientation for the next module, starting from the state it observes.",
+    "golden_answer": "The agent observes the state <𝓑, x, y>. 𝓑 is the current bounding-box area and (x, y) is the position of the last module placed. For the next module from the ready list, RLPM first computes the obstacles at the current time-stamp, which are the active cells of running modules, including cells already at the overlap limit. It then finds all maximal free rectangles, merges those sharing boundaries into maximal rectilinear polygons, and enumerates all top-left positions inside them. For each position it tries the module's four rectilinear orientations, giving candidate actions \\<x, y, φ>, where φ (0–3) is the number of 90-degree rotations. The Q-network takes the state and scores each candidate action. The network has three input neurons, hidden layers of 256 and 128 neurons, and one output neuron, and one copy is used per action. RLPM selects the action with the maximum Q-value. During training, an ε-greedy rule picks a random action with probability ε. The module is then placed, the state is updated with the new bounding-box area and position, a reward is computed, and the transition is stored for learning. The papers do not say how the action is encoded as network input.",
+    "required_points": "(1) Starts from the state <𝓑, x, y>. (2) Describes obstacles, maximal rectangles and rectilinear polygons. (3) Describes enumerating positions and four orientations as actions \\<x, y, φ>. (4) Describes Q-values per candidate and choosing the maximum. (5) Mentions ε-greedy exploration during training. (6) Describes the state update after placement. (7) Notes the action encoding is unspecified.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "P1: p.512 §4.1.2–4.1.3 and Figs. 3–4. P2: 6:9 §4.1.2; 6:10 §4.1.3 and Fig. 5; 6:11 Fig. 6; 6:17 §7 (ε-greedy settings)."
+  },
+  {
+    "id": "RLPM-34",
+    "question": "How do RLPM's overlapping constraint and its reward function work together to keep electrode usage within reliable limits?",
+    "golden_answer": "The overlapping constraint α is a positive integer giving the maximum number of modules that may overlap a micro-electrode over time. Each electrode has an overlap value uₓ,ᵧ that must stay between 0 and α. It acts as a hard constraint on legal actions. A module cannot be placed on cells that would exceed it, cells that reach α become permanent obstacles, and no cell may be used by two modules at the same time. The motivation is that heavily actuated electrodes degrade through charge trapping (about 200 actuations) and dielectric breakdown. The reward complements this by trading off three objectives. F₁ rewards placing modules near the top-left corner, F₂ rewards a smaller bounding box, and F₃ rewards overlap between parent and child modules. The whole sum is multiplied by 1/Σ 2^(uₓ,ᵧ − α). Because this divisor grows as electrode overlap values rise, a higher overall overlap lowers the reward (an inference from the formula). This pushes the agent to keep usage spread out while still overlapping where it helps area and routing. The reliability metric ρ = U / (Σ of uₓ,ᵧ for u ≤ α + Σ of uₓ,ᵧ² for u > α) is used for evaluation, not as a reward term. P2 says α is \"not included\" in the reward, even though α appears in the divisor, so the exact intended role is slightly unclear. Results show that raising α from 2 to 3 speeds learning, and that larger α lets the chip area shrink.",
+    "required_points": "(1) Defines α as the maximum overlap per electrode and uₓ,ᵧ ≤ α as a hard constraint. (2) Says cells at α become permanent obstacles. (3) Gives the reward's divisor 1/Σ 2^(uₓ,ᵧ − α) and its penalizing effect (labelled inference). (4) Notes F₂ and F₃ encourage overlap, so the terms trade off. (5) Says ρ is an evaluation metric. (6) Notes P2's \"α not in the reward\" remark versus α in the divisor.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "P1: p.511 §3.2.3; p.512 §4.1.1; p.513 §4.1.4, §4.2, §5. P2: 6:5 §2.3; 6:9 §4.1.1; 6:11 §4.1.4; 6:12 §4.2; 6:19 §7.1; 6:20 Fig. 15; 6:21 Fig. 18."
+  },
+  {
+    "id": "RLPM-35",
+    "question": "How is RLPM's DQN trained, and what exploration, replay, and target-network settings does it use?",
+    "golden_answer": "RLPM is a Deep Q-Network method. For each placement decision the network predicts Q-values for the candidate actions, the maximum-Q action is taken, and the resulting reward and next state are stored as experiences (state, action, reward, next state) in a replay memory. Training samples minibatches from that memory. P2 reports these settings: replay buffer of 30,000 experiences, batch size 128, discount factor 0.9, learning rate 0.9, and a target-network update every 15 epochs or steps (the unit is not specified). Exploration is ε-greedy, with ε starting at 1 and ending at 0.001 (1e-3), a decay rate of 0.0003, and ε decaying over 1,500 episodes. Total training is 3,000 episodes, with weights saved every 1,000 epochs. Smaller testcases can use fewer episodes. P1 gives the DQN structure (Fig. 4, with replay memory and training loop) but none of these numeric settings. Neither paper specifies the optimizer, loss function or activation functions.",
+    "required_points": "(1) Says DQN with experience replay of (state, action, reward, next state). (2) Gives replay buffer 30,000 and batch 128. (3) Gives discount 0.9 and learning rate 0.9. (4) Gives target-network update every 15 epochs/steps. (5) Gives ε from 1 to 0.001, decay rate 0.0003, over 1,500 episodes. (6) Gives 3,000 total episodes. (7) Notes P1 gives no numeric settings.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Easy",
+    "evidence": "P1: p.512 Fig. 4; p.511 §4. P2: 6:11 Fig. 6; 6:17–18 §7 hyperparameter list items (i)–(x)."
+  },
+  {
+    "id": "RLPM-36",
+    "question": "How is the chip size chosen in RLPM's experiments?",
+    "golden_answer": "The question does not say which experiment, so the answer depends on it. In the \"larger chip\" comparison (Case I, Table 3), P2 says that after module binding the total module area A is computed from the bound modules. The chip is then set to H × W with the smallest H such that H = W and H² ≥ A. The resulting sizes are T1 28 × 28, T2 34 × 34, T3 70 × 70, T4 32 × 32, T5 40 × 40, T6 54 × 54 and T7 34 × 34. P1 reports the same sizes but does not state the rule. In the \"smaller chip\" comparison (Case II, Table 4), the chip is set to the bounding-box dimensions that RLPM found (T1 20 × 22, T2 24 × 32, T3 46 × 60, T4 20 × 28, T5 30 × 40, T6 30 × 54, T7 24 × 32). In the figure experiments the sizes are fixed by hand: 15 × 15 with α = 2 for Fig. 16, 30 × 40 for the α sweep in Fig. 18, and several sizes for the T4 comparison (26 × 36 to 38 × 48 in P2; P1's Fig. 7(a),(b) text gives 18 × 13 to 24 × 19). Fig. 17's chip size conflicts between P2's text (15 × 15) and caption (10 × 10), and Fig. 13's chip size is not stated.",
+    "required_points": "(1) Says the answer depends on the experiment. (2) Gives the Case I rule (H = W, H² ≥ total module area) and the sizes. (3) Gives the Case II rule (RLPM's bounding box dimensions) and sizes. (4) Mentions fixed sizes in the figure experiments. (5) Notes P1 gives the sizes without the rule. (6) Notes the Fig. 17 conflict.",
+    "question_type": "Ambiguous reference",
+    "answerability": "Ambiguous",
+    "difficulty": "Medium",
+    "evidence": "P1: p.514 Table 2, Fig. 7 and text. P2: 6:20 §7.2 (Case I); 6:22 Tables 3–4 and Case II; 6:20–21 Figs. 14, 16–18; 6:19 §7.1 (Fig. 17 text)."
+  },
+  {
+    "id": "RLPM-37",
+    "question": "How does self-attention compute attention weights in a Transformer?",
+    "golden_answer": "No supplied paper discusses Transformers or self-attention, so this cannot be answered from them.",
+    "required_points": "(1) Says no paper covers Transformers or self-attention. (2) Does not answer from outside knowledge presented as paper content. (3) Optionally notes RLPM uses a small feed-forward network.",
+    "question_type": "Unanswerable (out of corpus)",
+    "answerability": "Absent",
+    "difficulty": "Easy",
+    "evidence": "P1: pp.509–514 (checked, no Transformer or attention content). P2: 6:1–6:25 (checked, none)."
+  },
+  {
+    "id": "RLPM-38",
+    "question": "How many operations and edges does the original RLPM paper list for the PCR benchmark (T1)?",
+    "golden_answer": "7 operations and 6 edges.",
+    "evidence": "§5, Simulation Results"
+  },
+  {
+    "id": "RLPM-39",
+    "question": "What dimensions does Table 1 list for the detector module (M₆)?",
+    "golden_answer": "3 × 3 unit cells.",
+    "evidence": "Table 1, M₆ row"
+  },
+  {
+    "id": "RLPM-40",
+    "question": "How much RAM did the PC used for the RLPM simulations have?",
+    "golden_answer": "32 GB.",
+    "evidence": "§5, Simulation Results"
+  }
+]

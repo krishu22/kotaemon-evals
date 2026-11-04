@@ -1,0 +1,152 @@
+[
+  {
+    "id": "AOP-01",
+    "question": "What constraints does the row-based virtual topology place on the number and size of placement rows and routing channels, and which minimum dimensions does it require?",
+    "golden_answer": "The chip (H × W) is partitioned into disjoint placement and routing regions that together cover every electrode. The placement region is Np parallel rows of height hp and width wp = W − 2·wr, inset by wr from both chip edges. The routing region is a top path, a bottom path, inter-row channels of height hr, and side channels of width wr. The height constraint is Np·hp + hr·(Np + 1) ≤ H. The width constraint is 2·wr + wp ≤ W. The minimums are hp ≥ 6 (a mixer of height 4 plus a 2-cell interference region/guard ring), wr ≥ 4 (routing of unit-volume droplets without morphing), and Np ≥ 1. The paper's worked 24×72 chip uses hr = 4, hp = 6, wr = 4, Np = 2 and wp = 64, which satisfies both constraints.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.24:12 Table 2; p.24:12–13 Eqs. (2)–(9); p.24:13 Eqs. (10)–(12) and the explanation after them; p.24:14 Fig. 10 and the paragraph below it. Note: Eq. (12) lists no hr minimum; hr = 4 is a chosen value, with 4×4-cell routing paths stated as the minimum for unit-volume droplets. wp = 64 is read from the Fig. 10 constraint check.",
+    "required_points": "1. Height constraint Np·hp + hr(Np+1) ≤ H. 2. Width constraint 2·wr + wp ≤ W. 3. hp,min = 6 (4 + 2 for the guard ring). 4. wr,min = 4. 5. Np ≥ 1. 6. Placement and routing regions are disjoint and cover the whole chip. 7. (Optional) The 24×72 example values."
+  },
+  {
+    "id": "AOP-02",
+    "question": "For the mixing-graph example used to compare placement results, what algorithmic runtime, occupied area, and overlapping value does each of WLSM, RLPM, AOP, and AOP+PRE obtain?",
+    "golden_answer": "WLSM takes 1.39 s, occupies area 396 and has overlapping value Φ = 2. RLPM takes 344.61 s, area 264, Φ = 2. AOP takes 0.63 s, area 216, Φ = 3. AOP+PRE takes 0.87 s, area 324, Φ = 2. AOP is the fastest and smallest but has the highest overlap (worst reliability). AOP+PRE matches the overlap of WLSM and RLPM at a larger area than AOP and a similar runtime. RLPM's runtime is orders of magnitude higher than the others. The authors obtained the RLPM numbers from their own Python implementation of RLPM, so these are not figures from the RLPM paper's own experiments.",
+    "required_points": "1. WLSM: 1.39 s, 396, Φ=2. 2. RLPM: 344.61 s, 264, Φ=2. 3. AOP: 0.63 s, 216, Φ=3. 4. AOP+PRE: 0.87 s, 324, Φ=2. 5. AOP best on runtime and area, worst on Φ. 6. (Optional) RLPM figures come from the AOP authors' implementation.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Easy",
+    "evidence": "Mandal 24:10 Fig. 9 panels; 24:27 Table 6 row 2; 24:24 Sec 7 (all prior methods reimplemented in Python). The RLPM paper reports different metrics (U, B, ρ) and hours of training time, so its numbers cannot be compared directly."
+  },
+  {
+    "id": "AOP-03",
+    "question": "How does the compaction procedure in AOP work, when is it invoked, and what does it cost?",
+    "golden_answer": "Compaction handles external fragmentation inside a placement row. It is invoked when no single free segment in a row can hold the module, but the total fragmented free space in that row is at least the module's size. It shifts all placed modules in the row toward the left boundary, merges the free fragments into one contiguous free block on the right, and updates the placed-module and free-space tables. The cost is a traversal of the row (O(N) on an N×N grid). Shifting is a uniform move needing no obstacle avoidance, so its worst case is linear in chip width, O(W), and the overhead is negligible compared with NP-hard routing. In the worked example, a row spans positions 1 to 18 with height 6, and a width-6 module starts at position 7. The two free fragments are 6×6 = 36 each, which cannot fit a module needing 6×10 = 60. After compaction there is one contiguous 6×12 = 72 free block, which fits it.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.24:16–17 text on row data structure and Algorithm 2 lines 12–16; p.24:19–20 Fig. 15, Algorithm 4, Lemma 3 and worked numbers; p.24:21 paragraph on shifting complexity; p.24:26 Table 5.",
+    "required_points": "1. Moves placed modules left and merges free space on the right. 2. Triggered only when total fragmented space suffices but no single fragment does. 3. Row traversal cost O(N), and shifting is O(W). 4. Overhead is negligible compared with routing. 5. (Optional) Worked example: 36 + 36 vs 60 needed; 72 after compaction."
+  },
+  {
+    "id": "AOP-04",
+    "question": "How is routing time related to routing length in the compaction-overhead comparison, and how does compaction overhead compare with routing as placement row width increases?",
+    "golden_answer": "Droplet movement is taken to need about 183 ms per electrode, under the conditions of 100 Vp-p, a 100 µm gap and 1 kHz. The reported times follow routing length multiplied by 0.183 s (derived check). For example, a routing length of 214.83 gives 39.31 s and a compaction length of 11.26 gives 2.06 s at row width 30. Likewise 244.60 gives 44.76 s and 15.20 gives 2.78 s at width 40. At width 50, 270.16 gives 49.44 s and 21.26 gives 3.89 s. At width 60, 275.73 gives 50.49 s (the product is 50.46 s, so there is a small rounding difference) and 23.46 gives 4.29 s. As row width grows from 30 to 60, routing sub-tasks fall (8.33 to 5.46) while routing length and time rise. Compaction is invoked only about 1.06–1.23 times on average, and its length and time are much smaller than routing's. Compaction time is about 5.2%, 6.2%, 7.9% and 8.5% of routing time at widths 30, 40, 50 and 60 (derived). Compaction time more than doubles (2.06 to 4.29 s) while routing time rises about 28%, though it stays a small fraction of routing, which supports the authors' claim that the overhead is negligible.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "p.24:25 end of the page (183 ms and electrode parameters); p.24:24 (150 random testcases); p.24:26 Table 5 and the paragraph after Fig. 18. Ratios and the length × 0.183 relation were computed by me. The unit of \"routing length\" is not labeled and is inferred to be electrode steps.",
+    "required_points": "1. About 183 ms per electrode traversal. 2. Reported times match length × 0.183 s (inference, labeled). 3. Compaction time stays well below routing time (roughly 5–9%). 4. Sub-tasks decrease while routing length and time increase with width. 5. Compaction is invoked fewer times than there are routing sub-tasks. 6. (Optional) Compaction time grows faster than routing time."
+  },
+  {
+    "id": "AOP-05",
+    "question": "How is droplet splitting used in MEDA biochip methods, and how is the spacing between split droplets or around modules handled?",
+    "golden_answer": "Splitting serves different purposes across the papers. In the splitting-aware routing paper, fewer, larger droplets are moved and then split into smaller droplets so the pieces start close to their mixing partners, shrinking the routing bounding box. Pieces are separated by an interference distance B (value not reported), and a split takes a fixed aliquot time of about a second per prior work. In the target-guided routing paper, splitting and merging each cost 1 time unit (the same as a size-1 droplet moving one cell). Size-1 droplets must have no other droplet within their 8 surrounding cells (coordinate difference of at least 2 in x or y). A horizontally elongated size-2 droplet may split only horizontally. Vertical and diagonal splits are disallowed, and the authors say the earlier method allowed physically implausible patterns. In RLPM/CAMR, a unit droplet cannot be morphed or split. A droplet of volume 2–4 can morph from 2×2 to 1×d unit cells or split into d unit droplets. One of volume 5–8 can morph from 3×3 to 2×⌈d/2⌉ or split equally into two 2×2 droplets. CAMR morphs when the collision zone is horizontal or vertical and splits otherwise, routing split pieces sequentially. RLPM spacing uses guard rings: one micro-electrode around a module during placement and two during routing. Droplets must never touch during movement. In the online-synthesis paper, splitting occurs inside split-and-recombine mixing (split, rotate, recombine). A mixer is 4 cells high plus a 2-cell interference region (guard ring) and 4×(2b+1) wide for output volume b, excluding the guard ring. The +1 is a separator between input and output fluid. Its routing does not use morphing and relies on stalling. The papers define spacing differently (B, a one-cell gap, guard rings), and no common parameter is shared.",
+    "required_points": "1. Shiro: split after transport to cut the bounding box, gap B, ~1 s aliquot. 2. Hamachiyo: split and merge cost 1, 8-neighbour separation, horizontal-only split for horizontal size-2. 3. RLPM/CAMR: volume-dependent morph/split rules; morph vs split by collision-zone shape; unit droplets unsplittable. 4. RLPM guard rings: 1 cell (placement), 2 cells (routing). 5. Mandal: SAR mixing, 4+2 height, 4×(2b+1) width, no morphing in routing. 6. Spacing conventions differ across papers.",
+    "question_type": "Synthesis (cross-paper)",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "Shiro pp.2–4, p.6 Eqs. (6)–(7), p.7; Hamachiyo p.4, pp.7–9 Eqs. (6)–(8), (14), Fig. 8; RLPM 6:5–6 Sec 3.1 and Fig. 3, 6:13–14 Sec 5.1.1, 6:17 Sec 6; Mandal 24:14–15 Secs 6.1.1–6.1.2, Fig. 11."
+  },
+  {
+    "id": "AOP-06",
+    "question": "What value of the overlapping threshold Φ′ is used for AOP+PRE when it is compared against WLSM and RLPM, and what electrode lifespan figure is it based on?",
+    "golden_answer": "The AOP paper does not report the Φ′ values used in its WLSM/RLPM comparison, and it gives no numeric electrode lifespan. It defines Φ′ as the maximum number of modules allowed to use a given microelectrode, based on electrode lifespan, and sweeps Φ′ from 2 to 7 on four synthetic benchmarks. In the main comparison the overlap AOP+PRE achieves equals that of WLSM and RLPM on all 12 assays (1, 2, 7, 2, 2, 2, 3, 2, 2, 3, 3, 3), which suggests matched thresholds, but this is an inference. The RLPM paper supplies a lifespan figure: citing an experimental study, it states that a DMFB electrode degrades completely after about 200 actuations. RLPM does not tie that number to its overlap constraint α. RLPM uses α = 2 in several comparisons and varies α from 1 to 4 in one study. Note that α means the overlap cap in RLPM but occupied area in the AOP paper.",
+    "required_points": "1. AOP paper: per-benchmark Φ′ not reported. 2. Φ′ is the max modules per electrode, tied to lifespan. 3. AOP paper gives no numeric lifespan. 4. Φ′ swept 2–7 on four benchmarks. 5. Achieved Φ equals WLSM and RLPM on all 12 assays (inference about matched thresholds labeled). 6. RLPM paper cites about 200 actuations for DMFB electrodes, not linked to Φ′. 7. α is used with different meanings in the two papers.",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "Mandal 24:11 Sec 5.2; 24:22 Algorithm 5 and text; 24:27 Table 6, Fig. 19. RLPM 6:5 Motivation (~200 actuations); 6:8 α definition; 6:13 Fig. 13(c); 6:19–20 Figs. 14–16, 18. RLPM's α for Tables 3 and 4 is not stated."
+  },
+  {
+    "id": "AOP-07",
+    "question": "In the recovery strategy of the reliability enhancer in AOP, how many extra placement rows are added for the three unreliable modules in the illustrative example?",
+    "golden_answer": "The corpus gives the method and peak width but not a definite row count. The three unreliable modules have volumes 4, 6 and 4, giving widths 2·vol + 1 = 9, 13 and 9. A sweep over allocation and release events finds a peak concurrent width of 31, when all three overlap. The number of additional rows is ⌈31 / wp⌉, where wp is the placement row width, and the procedure is then repeated with the updated row count. The example does not state wp. Inference: if wp ≥ 31 (for example 64 in the paper's other example), one extra row would result, but the paper does not link the two examples.",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "p.24:21–22 recovery text and Algorithm 5 lines 20–30; p.24:22–23 illustrative example; p.24:23 Fig. 16; p.24:14 Fig. 10 (wp = 64, a different example).",
+    "required_points": "1. Widths 9, 13, 9 from volumes 4, 6, 4. 2. Peak concurrent width 31. 3. Rows added = ⌈31 / wp⌉. 4. wp for this example is not given, so the count is not determined. 5. Any \"one row if wp ≥ 31\" statement is labeled as inference."
+  },
+  {
+    "id": "AOP-08",
+    "question": "How can I reconstruct the benchmark assays used to compare the module placement methods?",
+    "golden_answer": "The corpus gives part of what is needed, and two papers disagree. The AOP paper compares on 12 assays: PCR, in-vitro diagnostics, colorimetric protein assay and nine synthetic benchmarks SB I–IX, with node counts 7, 13, 56, 10, 10, 13, 13, 15, 16, 18, 19, 22 and scheduling lengths 18, 18, 54, 23, 25, 27, 25, 16, 23, 22, 28, 40. All methods share the same list-scheduling output. Synthetic graphs come from the STWM sample-preparation method, and SB I and II are cited to the RLPM conference paper. The RLPM paper lists seven testcases: PCR (7 operations, 6 edges), IVD (12, 6), CPA (55, 54), synthetic benchmarks I–III (10/9, 20/19, 30/29) and a fourth synthetic benchmark taken from a figure in another paper (9 operations, 10 edges). The real-life assays are attributed to a technical report not in the corpus. The two papers differ on node counts: IVD 13 vs 12, CPA 56 vs 55, SB II 10 vs 20, SB III 13 vs 30, and the \"Synthetic Benchmark IV\" name is attached to 13 vs 9 nodes. The corpus does not say whether this reflects version differences or counting conventions. Missing in both: graph structures, target ratios, mixer sizes, seeds and generation settings, STWM details, and code or data.",
+    "required_points": "1. Mandal: 12 assays with node counts and scheduling lengths. 2. RLPM: Table 2 operation and edge counts. 3. Synthetic graphs from STWM (Mandal). 4. Node-count discrepancies for IVD, CPA, SB II, SB III (and the SB IV label). 5. No explanation in the corpus (no invented one). 6. Structures, ratios, seeds, code and data are missing.",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "Mandal 24:24 Sec 7; 24:27 Table 6; 24:28 refs [6], [16], [26]. RLPM 6:18 Table 2. Mandal's Table 4 lists a 3-node colorimetric protein assay (ratio 1:31:32) that differs from its 56-node CPA in Table 6."
+  },
+  {
+    "id": "AOP-09",
+    "question": "Do modules placed by AOP include a guard ring, how large is it, and can adjacent modules share guard-ring cells?",
+    "golden_answer": "The AOP paper pads modules with an interference region (guard ring). Mixer height is 4 plus 2 for the guard ring, giving a minimum row height of 6, and the mixer width formula 4×(2b+1) excludes the guard ring. The paper does not say on which sides the two extra cells lie, whether adjacent modules or a module and the chip edge may share guard cells, or whether guard cells count toward area or overlap values. The RLPM paper defines two guard rings: a first ring one micro-electrode wide around a module for placement and a second ring two micro-electrodes wide for routing. Inference: the +2 in AOP's row height fits a one-cell ring on each side, like RLPM's first ring, but AOP does not say so. RLPM also does not state whether guard cells are shared or counted. Its overlap values are defined on the cells used by modules.",
+    "required_points": "1. AOP includes an interference region/guard ring. 2. Height 4+2=6; width excludes it. 3. AOP does not specify sharing, sides, chip-edge treatment, or counting. 4. RLPM defines 1-cell (placement) and 2-cell (routing) rings. 5. Link between the two papers is inference. 6. RLPM is also silent on sharing and counting.",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "Mandal 24:13 explanation of Eq. (12); 24:14 text under Fig. 10 and Sec 6.1.2; 24:15 Fig. 11 legend. RLPM 6:5 Sec 3.1 and Fig. 3(a); 6:8–9 placement constraints and u."
+  },
+  {
+    "id": "AOP-10",
+    "question": "By how much does assay completion time increase on the benchmark assays when AOP has to reschedule operations after a placement failure?",
+    "golden_answer": "This cannot be determined from the corpus. The benchmark comparison reports one scheduling length per assay (identical scheduling is used for all placers), plus runtime, area and overlap per placer, but no completion time after placement. The paper explains the mechanism: when no valid placement exists, the module and everything reachable from it are shifted to the next timestamp, and a critical-path module's shift increases completion time. Its small illustration goes from three timestamps to four. It also says compaction adds a small completion-time overhead without giving a total. How often rescheduling occurred on the benchmarks, or the resulting increase, is not reported.",
+    "question_type": "Unanswerable within topic",
+    "answerability": "Absent",
+    "difficulty": "Medium",
+    "evidence": "p.24:18 rescheduling paragraph; p.24:19 Fig. 14 and illustrative example; p.24:21 compaction overhead statement; p.24:26–27 Sec 7.3 text (\"same scheduling results\") and Table 6 columns.",
+    "required_points": "1. States that no per-benchmark completion-time increase is reported. 2. May describe the rescheduling mechanism and the one-timestep illustration. 3. Does not invent a figure and does not claim zero increase. 4. Does not generalize the illustrative example to the benchmarks."
+  },
+  {
+    "id": "AOP-11",
+    "question": "Why does AOP+PRE achieve the smallest occupied chip area of all four placement methods across the benchmark assays?",
+    "golden_answer": "The premise is wrong. In the 12-assay comparison, AOP without PRE gives the smallest area in 10 assays, ties RLPM at 300 on SB VII, and is beaten by RLPM on SB IV (288 vs 330). AOP+PRE is never the smallest. It matches WLSM at 252 on the PCR assay and is smaller than WLSM in the other 11. Against RLPM it is equal in three assays (PCR 252, CPA 324, SB I 360) and larger in the other nine (for instance IVD 324 vs 264, SB IX 408 vs 288). AOP+PRE spends extra area to cut overlap Φ to the level of WLSM and RLPM on all 12 assays, whereas AOP's overlap is higher (for example 3 vs 2 on IVD, and 8 vs 7 on the colorimetric protein assay). The paper's wording that AOP+PRE is only \"slightly\" larger than RLPM \"for a few testcases\" understates the table.",
+    "question_type": "False premise",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.24:27 Table 6 (all 12 rows compared); p.24:27 Sec 7.3 text; p.24:3 Fig. 3(b) ordering (AOP, RLPM, AOP+PRE, WLSM). Counts were computed from the table.",
+    "required_points": "1. Corrects the premise: AOP+PRE is not the smallest. 2. AOP is smallest or tied in 11 of 12 (RLPM smaller on SB IV). 3. AOP+PRE ≤ WLSM everywhere, equal on the PCR assay. 4. AOP+PRE > RLPM in 9 of 12, equal in 3. 5. AOP+PRE trades area for lower Φ. The assistant should not accept that AOP+PRE has the smallest area."
+  },
+  {
+    "id": "AOP-12",
+    "question": "Does FOS achieve better results than the offline EOPS approach?",
+    "golden_answer": "It depends on the configuration. When EOPS is tuned for MEDA, FOS closely tracks EOPS but is not better, and the authors say their aim is not to beat the offline method. On the seven real-life assays, FOS has a slightly higher completion time than EOPS in six (for example 14.26 vs 14.06) and lower only for RNA extraction (19.54 vs 20.09). FOS also has more routing sub-problems than EOPS in four assays and equal in three. FOS and EOPS both show zero fragmented area. When EOPS and PBOS are instead run on DMFB-compatible transformed test cases (two-size mixers only), FOS is reported to outperform both on scheduling length, electrode actuations and routing sub-problems, and the gap narrows as the height difference between the original and transformed test cases shrinks. The two claims therefore refer to different EOPS setups and partly different metrics.",
+    "question_type": "Consistency check",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "p.24:24 Sec 7.1 text; p.24:25 Fig. 17 and Table 4; p.24:26 Fig. 18 and Sec 7.2. Table 4 comparisons were computed by me. Bar values in Figs. 17–18 are not readable and are not required.",
+    "required_points": "1. MEDA-tuned EOPS: FOS is close to it, not better, and the authors say so. 2. Table figures: FOS Tc higher in 6 of 7, lower for RNA extraction. 3. DMFB-transformed setup: FOS reported better on Tl, actuations and ρ. 4. The discrepancy is explained by different EOPS configurations and metrics. 5. No claim that FOS beats EOPS unconditionally."
+  },
+  {
+    "id": "AOP-13",
+    "question": "What chip size do the experiments use?",
+    "golden_answer": "It depends on which paper and experiment is meant. The online-synthesis paper compares placers on a 6×72 chip (height × width), illustrates virtual topology on 24×72, and uses 5×7, 5×5 and 5×3 chips in small figures. The chip size for its FOS-versus-EOPS/PBOS comparison is not stated. The RLPM paper has no single size. For its area comparison with HSM and WLSM, the chip is the smallest square H×H with H² at least the total module area: 28×28, 34×34, 70×70, 32×32, 40×40, 54×54 and 34×34 for T1–T7. For its routing and reliability comparison, the chip size is the bounding box RLPM found: 20×22, 24×32, 46×60, 20×28, 30×40, 30×54 and 24×32. T4 is also tested on 26×36, 30×40, 34×44 and 38×48, the α sweep uses 30×40, and the learning curves use 15×15. The T7 consistency run is 15×15 in the text but 10×10 in the figure caption, which also differs on the number of runs (5 vs 10). The target-guided routing paper uses 8×8, 10×10 and 12×12. The splitting-aware routing paper uses a 200×200 maximum, with reported biochip sizes such as 9×4. RLPM does not state explicitly whether its dimensions are micro-electrodes or 2×2-electrode unit cells. A good answer asks which experiment is meant.",
+    "required_points": "1. Asks which paper or experiment, or answers conditionally. 2. Mandal: 6×72 (placers), 24×72 (topology example); FOS chip size not stated. 3. RLPM: square chips for Table 3, bounding-box sizes for Table 4, plus 26×36–38×48, 30×40, 15×15. 4. Notes the 15×15 vs 10×10 discrepancy for T7. 5. Hamachiyo: 8×8–12×12. 6. Shiro: 200×200 maximum vs bounding-box sizes. 7. RLPM's unit (electrodes vs unit cells) is not explicit.",
+    "question_type": "Ambiguous reference",
+    "answerability": "Ambiguous",
+    "difficulty": "Hard",
+    "evidence": "Mandal 24:4, 24:5, 24:14, 24:19, 24:27 Table 6. RLPM 6:5 Sec 3.1, 6:17–18 unit-cell, 6:19 text before Fig. 16/17, 6:20–22 Fig. 14, Fig. 18, Tables 3–4; 6:21 Fig. 17 caption. Hamachiyo p.11. Shiro p.9, p.11."
+  },
+  {
+    "id": "AOP-14",
+    "question": "How does the Adam optimizer update its parameters?",
+    "golden_answer": "The corpus does not describe this. The RLPM paper lists its DQN training settings (learning rate, batch size, discount factor, exploration schedule, replay buffer, target-network update frequency) but names no optimizer, loss function or activation functions, so Adam cannot be attributed to it. The assistant should say the documents give no explanation of Adam and may offer a general answer clearly labeled as outside the documents.",
+    "required_points": "1. States the corpus does not explain Adam. 2. Does not claim RLPM uses Adam. 3. May mention that RLPM names no optimizer. 4. Any general explanation is labeled as outside the documents.",
+    "question_type": "Out of scope (topic-adjacent)",
+    "answerability": "Absent",
+    "difficulty": "Easy",
+    "evidence": "RLPM 6:10–11 network and 6:17–18 hyperparameters; other papers mention RL only as related work."
+  },
+  {
+    "id": "AOP-15",
+    "question": "What is the boiling point of water at the summit of Mount Everest?",
+    "golden_answer": "The supplied corpus does not cover this. It contains nothing about atmospheric pressure or boiling points. The assistant should say it cannot answer from the documents and may offer a clearly labeled general answer.",
+    "question_type": "Out of scope",
+    "answerability": "Absent",
+    "difficulty": "Easy",
+    "evidence": "Entire corpus (both PDFs); no related content.",
+    "required_points": "1. States the question is unrelated to the corpus. 2. Does not invent a citation. 3. Any general answer is labeled as outside the documents."
+  }
+]

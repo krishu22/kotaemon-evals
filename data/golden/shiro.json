@@ -1,0 +1,152 @@
+[
+  {
+    "id": "SHIRO-01",
+    "question": "In the MEDA droplet-routing method that allows splitting during routing, how is \"biochip size\" defined and computed?",
+    "golden_answer": "Biochip size is the area of the bounding rectangle enclosing all cells visited by the droplets' routing paths, up to the point where both mixing operations start. It is the product of the horizontal extent (maximum of x plus droplet width, minus minimum x) and the vertical extent (maximum of y plus droplet height, minus minimum y). The max and min are taken over all droplets, including split droplets, and over all time steps. It is counted in cells, and the routing minimizes it.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.3 Sec 2.1 (rectangle built from routing paths); p.7 Eq. (11) and the sentence before it; p.4 Fig. 1c (8×4 example). Note: the Fig. 8 axis text on p.10 loosely says \"total number of cells passed by the droplets,\" but Eq. (11) and the worked examples (9×4, 17×3, 8×4) use bounding-box area.",
+    "required_points": "1. Defined as a bounding rectangle of all droplet paths. 2. Computed as (x-extent) × (y-extent) using max(x+w) − min(x) and max(y+h) − min(y). 3. Covers all droplets, including split droplets, up to the start of mixing. 4. Unit is cells. 5. It is the objective being minimized."
+  },
+  {
+    "id": "SHIRO-02",
+    "question": "For the first single-couple benchmark instance, what biochip sizes do the proposed method and the state-of-the-art method reach, and with what dimensions?",
+    "golden_answer": "In Case 1 of the single-couple experiment, the proposed method reaches a biochip size of 36 cells (9×4). The state-of-the-art method reaches 51 cells (17×3).",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Easy",
+    "evidence": "p.10 text under Fig. 8 and p.11 Figs. 9–10; p.9 Table 2 (Case 1: volumes 3,3,3,3 vs 6,6). Verification note: the Case 1 bars in Fig. 8 look lower than 36 for the proposed method, but this is a visual estimate only. Fig. 8 has no data labels, so the exact bar values cannot be verified.",
+    "required_points": "1. Proposed: 36 cells, 9×4. 2. State of the art: 51 cells, 17×3. 3. Proposed is smaller."
+  },
+  {
+    "id": "SHIRO-03",
+    "question": "In the MEDA droplet-routing study that minimizes biochip size by splitting droplets during routing, what solver, hardware, maximum chip size, and runtime limits were used?",
+    "golden_answer": "Both the proposed and the state-of-the-art methods were solved with IBM ILOG CPLEX Optimization Studio 20.1.0 on an Intel Core i9-7980XE at 2.60 GHz with 128 GB of memory. The chip size given was 200×200. The runtime limit was 10 hours of CPU time for the couple-routing scenario and 50 hours for the multiple-couples scenario. If no optimal solution was found within the limit, the solution at the time limit was used.",
+    "required_points": "1. CPLEX 20.1.0 for both methods. 2. i9-7980XE 2.60 GHz, 128 GB. 3. Chip size 200×200. 4. 10 h and 50 h limits. 5. Best solution at the time limit if optimality is not reached. The assistant should not mix in the other paper's settings.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "Shiro et al.: p.9 Sec 3.1 and the text after Tables 2 and 3. Rewording is needed because Hamachiyo et al. (CPLEX 22.1.0, i7-10700, 64 GB, 50,000 s) is also a MEDA routing study with different settings."
+  },
+  {
+    "id": "SHIRO-04",
+    "question": "Why does allowing droplets to split during routing reduce the required biochip size compared with routing independently dispensed droplets?",
+    "golden_answer": "In the state-of-the-art method, each droplet is dispensed separately from edge reservoirs. Dispensing units must be far apart, about twice the largest droplet edge plus the interference distance B. The droplets therefore start far from their mixing partners and travel long distances, which enlarges the bounding box. The proposed method inputs fewer, larger droplets (two instead of four, or four instead of eight). It moves them and then splits them into small droplets separated by B. After the split, the small droplets are already close to their partners, so the paths cover a smaller rectangle. Examples: 8×4 versus 8×5 in the Fig. 1/Fig. 2 example, and 36 versus 51 cells in Case 1. The paper reports a 56.3% average reduction for single couples. The authors attribute the gain to the dispensing-unit spacing in the state of the art, and note that closer initial positions mean smaller chips. The conclusion cautions that splitting adds operations that may cause density or volume errors.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "p.2 end of Sec 1.2 (motivation); pp.4–5 Sec 2.1, Eqs. (1), (3), Figs. 1–4; p.6 Eqs. (6)–(7), Fig. 5; pp.10–11 discussion of results; p.12 Conclusions.",
+    "required_points": "1. Dispensing-unit spacing (about twice the max edge plus B) forces independently input droplets to start far apart. 2. The proposed method inputs fewer large droplets and splits them after transport, with a gap B between pieces. 3. Split droplets start close to mixing partners, shrinking the bounding box. 4. Cites the empirical reduction (e.g., 56.3% average, or Case 1 36 vs 51). 5. Mentions the trade-off: splitting may introduce volume or density error."
+  },
+  {
+    "id": "SHIRO-05",
+    "question": "How does the method scale to multiple droplet couples, how many droplets does each method input in that setting, and in which instances is the improvement smallest?",
+    "golden_answer": "The extension adds an index s for droplet kinds to the edge-placement constraint (Eq. 14); the rest of the formulation carries over. The example uses eight droplets (A–H) with sizes 2,2,1,1,2,2,1,1, mixing A–C, B–D, E–G, F–H. The state of the art inputs eight droplets, while the proposed method inputs four and splits them into eight (Table 3). Reductions reach up to 81.4% and average 56.2%. The improvement is slight in Case 1 and Case 20. The paper links this to large droplets, saying the state-of-the-art method fails to reduce the biochip size in cases with large droplets.",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.8 Sec 2.3, Fig. 7, Eq. (14); p.9 bullets under Sec 3.1; p.10 Table 3; p.11 text and Fig. 11. Caution: the \"large droplets\" explanation is stated loosely. Case 8 also has large droplets and appears to show a bigger gap in Fig. 11 (visual estimate), so do not require more than the paper's stated attribution.",
+    "required_points": "1. Extension via subscript s in the placement constraint (Eq. 14), reusing the single-couple formulation. 2. Eight droplets for the state of the art vs four split into eight for the proposed method. 3. Up to 81.4% and 56.2% average reduction. 4. Smallest improvement in Cases 1 and 20. 5. The paper attributes this to large droplets."
+  },
+  {
+    "id": "SHIRO-06",
+    "question": "How can I reconstruct the 20 benchmark instances used in the MEDA droplet-routing experiments?",
+    "golden_answer": "The corpus gives part of what is needed. Tables 2 and 3 list the droplet volumes for all 20 single-couple and 20 multiple-couple instances. In Table 2, the proposed method's droplet volumes are the sums of the state-of-the-art droplet pairs. The mixing pairs are A–C and B–D for single couples, and four pairs in the multiple-couple scenario. The chip limit is 200×200, and the formulation (Eqs. 1–11, 14) and the solver (CPLEX 20.1.0) are specified. The corpus does not specify numeric B, L_RR, or Aliquot values. It does not give the droplets' width and height (aspect ratios), only volumes. It gives no random-generation procedure or seed beyond \"given randomly,\" no solver parameters, and no code or data. The Data Availability Statement says \"Not applicable.\"",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "p.9 Sec 3.1 and Table 2; p.10 Table 3; p.4 Table 1; p.5 Eq. (2); p.12 Data Availability Statement.",
+    "required_points": "1. Tables 2 and 3 provide volumes for all instances. 2. Mixing pairs and the 200×200 chip limit are given. 3. Formulation and CPLEX 20.1.0 are given. 4. Missing: numeric B, L_RR, Aliquot. 5. Missing: droplet shapes (w,h), generation procedure or seed, solver settings, code or data. Must not claim that the authors did not use or record these."
+  },
+  {
+    "id": "SHIRO-07",
+    "question": "What numerical values do B, L_RR, and Aliquot take in the experiments?",
+    "golden_answer": "The corpus defines these parameters but gives no numeric values for B or L_RR. B is the distance needed to avoid interference between droplets (Table 1). L_RR is the minimum distance between dispensing units, and the paper defines it as twice the maximum droplet edge plus B, so its value depends on the unreported B. Aliquot is the fixed time for the split operation, which the paper says takes about a second per prior work, but the numeric Aliquot value in model time steps is not given. Inference: because B appears in Eq. (10) as \"B + 1\" alongside cell coordinates, it is probably a cell count, but the paper does not state its unit or value.",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "p.4 Table 1; p.5 text around Eq. (3), Fig. 3; p.7 aliquot text and Eq. (10); pp.3–4 Fig. 1b discussion.",
+    "required_points": "1. B: defined, value not reported. 2. L_RR: defined via max edge and B, value not reported. 3. Aliquot: split takes about a second, fixed constant, numeric step value not given. 4. Any unit inference for B must be labeled as inference."
+  },
+  {
+    "id": "SHIRO-08",
+    "question": "How many of the 20 single-couple instances did the solver prove optimal within the time limit, and what optimality gap remained on the others?",
+    "golden_answer": "This cannot be determined from the corpus. The paper says that if an optimal solution is not found within the time limit (10 h for single couples), the solution at the limit is used. It does not say which instances were solved to optimality, report per-instance runtimes, or report optimality gaps. The corpus therefore does not establish how many instances were proven optimal or what gaps remained.",
+    "question_type": "Unanswerable within topic",
+    "answerability": "Absent",
+    "difficulty": "Hard",
+    "evidence": "p.9 Sec 3.1 runtime-limit sentences; pp.10–11 Sec 3.2 and Figs. 8, 11 (sizes only, no runtimes or gaps); p.2 intro statement that the method finds an optimal route.",
+    "required_points": "1. States that the count of proven-optimal instances and the gap are not reported. 2. Mentions the time-limit rule and the 10 h limit. 3. Does not give an invented count. 4. Does not infer that all instances were optimal from the intro's \"optimal route\" wording."
+  },
+  {
+    "id": "SHIRO-09",
+    "question": "What reward function and network architecture does the proposed MEDA routing method use to train its reinforcement-learning agent?",
+    "golden_answer": "The premise does not hold for any routing method in these papers, so there is no routing reward function or routing network to report. The splitting-aware routing method is a mathematical program solved with CPLEX. The target-guided method is an integer linear program with a distance-map constraint. CAMR is a heuristic that starts from A* paths and then adjusts for collisions by morphing, splitting and stalling. The online-synthesis framework uses a modified maze router with stalling. Reinforcement-learning-based routing appears only as cited prior work. Reinforcement learning is used in the RLPM placement method, which is a DQN. Its state is <B, x, y>, the current bounding-box area plus the position of the last placed module. Its action is <x, y, φ>, a candidate position plus the number of rotations. The network has 3 input neurons, hidden layers of 256 and 128 neurons, and 1 output neuron. It is evaluated once per candidate state-action pair and predicts a Q-value. The reward is [ω1·H/(x²+y²+1) + ω2·(μ1 − 2B/μ2) + ω3·ΣC] × 1/Σ2^(u−α). The first term favors placement toward the top-left corner (shorter place-and-schedule time). The second favors a small bounding box, and the third rewards overlap between parent and child modules (routing-aware placement). The product with the last factor scales the result by a reliability factor built from per-electrode overlap values u relative to the overlap constraint α. The numeric ω values are not reported, only priority orderings for three goals (scheduling time, chip area, routing-awareness). μ1 and μ2 are given only as μ1 > μ2 with μ1·μ2 equal to the estimated total module area. Reported training settings: 3,000 episodes, batch size 128, replay buffer 30,000, discount 0.9, learning rate 0.9, ε from 1 to 0.001 with decay rate 0.0003 over 1,500 episodes, target network updated every 15 steps. No optimizer, loss function or activation functions are named.",
+    "required_points": "1. Corrects the premise: no proposed routing method uses RL. 2. Identifies routing methods as ILP/CPLEX, A*-based heuristic and maze-routing heuristic. 3. RL is in RLPM placement (DQN). 4. Network: 3 inputs, hidden 256 and 128, 1 output. 5. State <B,x,y> and action <x,y,φ>. 6. Three reward terms times a reliability factor. 7. ω and μ values are not reported. The assistant should not accept that a routing method trains an RL agent.",
+    "question_type": "False premise",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "RLPM: 6:1 abstract; 6:3 contributions; 6:9 state; 6:10 action and network; 6:11 Fig. 6 and reward; 6:17–18 hyperparameters. Routing methods: Shiro et al. abstract and p.9; Hamachiyo et al. pp.5–10; Mandal et al. 24:23–24 Algorithm 6; RLPM 6:13–15 CAMR. RL routing cited only as related work in Shiro p.2, RLPM 6:5, Mandal 24:28 refs."
+  },
+  {
+    "id": "SHIRO-10",
+    "question": "How does the proposed routing method route droplets around degraded or contaminated microelectrodes?",
+    "golden_answer": "It depends on which routing method is meant. The droplet-splitting routing study does not handle them: it assumes no unavailable cells, does not implement the aspect-ratio change used elsewhere to avoid them, and lists degradation and contamination as future work. The target-guided routing study does handle unavailable cells (unusable because of malfunction or droplet residue): droplets may not enter them, and diagonal moves next to them are restricted. Its experiments place 10%, 20% and 30% unavailable cells at random. CAMR treats active modules as obstacles, not degraded electrodes, and avoids collisions by morphing, splitting and stalling. Degradation is addressed upstream in RLPM placement through an overlapping constraint that caps how many modules can use an electrode, motivated by a reported electrode lifespan of about 200 actuations for DMFBs. The online-synthesis framework likewise does not route around degraded cells. Its placement reliability enhancer limits electrode reuse. Only the target-guided method routes around unusable cells explicitly.",
+    "required_points": "1. Notes the question needs a paper, or answers conditionally. 2. Splitting study: no unavailable cells, not implemented, future work. 3. Target-guided study: unavailable cells with movement restrictions (no entry, restricted diagonals). 4. CAMR: modules as obstacles. 5. Degradation handled in placement (RLPM α, Mandal PRE), not routing. The assistant should not claim the splitting study or CAMR routes around degraded cells.",
+    "question_type": "Ambiguous reference",
+    "answerability": "Ambiguous",
+    "difficulty": "Hard",
+    "evidence": "Shiro p.7 after Eq. (11), p.8, p.12; Hamachiyo p.4, p.5 Sec 2.1, pp.10–11 Eqs. (15)–(19) and Sec 3.1; RLPM 6:5 Motivation, 6:8–9 α, 6:13–15 CAMR; Mandal 24:5 Sec 2.2, 24:11 Sec 5.2, 24:21–22 Algorithm 5. Inference: Hamachiyo's \"unavailable cells\" correspond to degraded or contaminated electrodes."
+  },
+  {
+    "id": "SHIRO-11",
+    "question": "By how much does the proposed method reduce biochip size compared with the state of the art?",
+    "golden_answer": "It depends on which paper's method is meant. In the splitting-aware routing paper, the abstract reports a 70.8% average biochip-size reduction, while the results report 56.3% on average for single couples and up to 81.4% (56.2% on average) for multiple couples. In the RLPM paper, the abstract reports a 28.6% average reduction in total chip area utilization. In its detailed comparison, cell utilization is lower by 23.45% on average against HSM and 28.60% against WLSM, and bounding-box area is lower by 27.63% against HSM and 32.49% against WLSM. The 28.6% in the abstract matches the WLSM cell-utilization figure. The paper does not say how the abstract number was derived. The online-synthesis paper reports that AOP significantly reduces occupied area against WLSM and RLPM, with no aggregate percentage in the text. Summing the areas in its table gives about 41% below WLSM and 23% below RLPM (derived). The target-guided routing paper does not reduce chip size. It reduces solving time.",
+    "required_points": "1. Needs clarification of paper or method. 2. Shiro: 70.8% abstract vs 56.3% / 56.2% / up to 81.4%. 3. RLPM: 28.6% abstract; U 23.45% (HSM) and 28.60% (WLSM); B 27.63% and 32.49%. 4. AOP: qualitative claim only. 5. Hamachiyo reduces solving time, not chip size.",
+    "question_type": "Ambiguous reference",
+    "answerability": "Ambiguous",
+    "difficulty": "Hard",
+    "evidence": "Shiro p.1, p.10, p.11; RLPM 6:1 abstract, 6:20 Case I text, 6:22 Table 3; Mandal 24:1 abstract, 24:27 Table 6 and Sec 7.3; Hamachiyo p.1 and p.12. Derived: Table 3 averages rechecked from rows; AOP area sums 2814 vs WLSM 4746 and RLPM 3654. In Table 3, T1 HSM cell utilization 532→412 recomputes to 22.6%, not the printed 23.44% (the printed average of 23.45% matches the printed per-row values)."
+  },
+  {
+    "id": "SHIRO-12",
+    "question": "The abstract in Shiro et al. reports a 70.8% average reduction in biochip size, but the results section seems to report about 56%. Do these numbers reconcile?",
+    "golden_answer": "They do not reconcile within the paper. The abstract says 70.8% on average. The results report 56.3% (single couples) and 56.2% (multiple couples), with a maximum of 81.4%. No passage explains the difference, and since the two body averages are nearly equal, it cannot be explained by merging them (inference). Only one paper version was supplied, so other versions cannot be checked.",
+    "question_type": "Consistency check",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "p.1 Abstract; p.10 and p.11 results text. Unverified observation: rough visual reading of Fig. 8 bars suggests an average below 56%, but bar values cannot be read precisely, so this is not required.",
+    "required_points": "1. Abstract 70.8% vs body 56.3% and 56.2%. 2. Max 81.4% also reported. 3. The paper offers no reconciliation. 4. No invented explanation. 5. Any inference (e.g., averaging the two scenarios cannot give 70.8%) is labeled as inference."
+  },
+  {
+    "id": "SHIRO-13",
+    "question": "The experiments in Shiro et al. use a 200×200 chip, yet the reported biochip sizes are mostly under 100 cells. What accounts for this?",
+    "golden_answer": "The two numbers measure different things. 200×200 is the maximum chip size supplied as a constraint. The reported biochip size is the area of the bounding rectangle of the droplet routes (Eq. 11), for example 9×4 = 36 cells in Case 1. A 200×200 limit and sizes under 100 cells are therefore not in conflict.",
+    "question_type": "Consistency check",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.3 Sec 2.1 (\"maximum limit of biochip size as a constraint\"); p.9 Sec 3.1 (200×200); p.7 Eq. (11); p.10 Fig. 8, Case 1 numbers. Note: the Fig. 8 text calling size \"total number of cells passed by the droplets\" is looser than Eq. (11).",
+    "required_points": "1. 200×200 is the allowed maximum. 2. Reported size is the bounding-box area of the routes. 3. Example such as 36 cells (9×4). 4. Conclusion: no conflict."
+  },
+  {
+    "id": "SHIRO-14",
+    "question": "What is the difference between on-policy and off-policy reinforcement learning?",
+    "golden_answer": "The corpus does not explain this. The RLPM paper uses a DQN with a replay buffer and mentions that the buffer stores experiences for off-policy learning, but no paper defines on-policy versus off-policy learning or contrasts them. The assistant should say the documents do not define the distinction, may point to the passing mention, and may offer a general answer clearly labeled as outside the documents.",
+    "required_points": "1. States the corpus gives no definition. 2. Does not attribute a definition to any paper. 3. May note the single off-policy mention without elaborating it. 4. Any general explanation is labeled as outside the documents.",
+    "question_type": "Out of scope (topic-adjacent)",
+    "answerability": "Absent",
+    "difficulty": "Easy",
+    "evidence": "RLPM 6:17–18 hyperparameter list (replay buffer, off-policy mention); other papers mention RL only as related work."
+  },
+  {
+    "id": "SHIRO-15",
+    "question": "What hydration percentage should a beginner use for a sourdough loaf?",
+    "golden_answer": "The supplied corpus does not cover sourdough baking, so the question is out of scope. The assistant should say it can't answer from the documents and may offer to help from general knowledge, clearly labeled as such.",
+    "question_type": "Out of scope",
+    "answerability": "Absent",
+    "difficulty": "Easy",
+    "evidence": "Entire PDF; no baking content.",
+    "required_points": "1. States the question is unrelated to the corpus. 2. Does not invent a citation. 3. Any general-knowledge help is clearly labeled as outside the documents."
+  }
+]
