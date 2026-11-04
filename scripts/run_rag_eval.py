@@ -1,20 +1,32 @@
 #!/usr/bin/env python
-"""Answer one golden-dataset question using Kotaemon's configured file-QA pipeline."""
+"""Answer golden-dataset questions using Kotaemon's configured file-QA pipeline."""
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import re
 import sqlite3
 import sys
 import tempfile
 import uuid
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 TABLES_TO_COPY = ("llm_table", "embedding", "reranking")
+BATCHES = {
+    "aop": ("aop.json", 0, 15),
+    "shiro": ("shiro.json", 0, 15),
+    "target": ("target.json", 0, 10),
+    "rlpm-1": ("rlpm.json", 0, 10),
+    "rlpm-2": ("rlpm.json", 10, 20),
+    "rlpm-3": ("rlpm.json", 20, 30),
+    "rlpm-4": ("rlpm.json", 30, 35),
+    "rlpm-5": ("rlpm.json", 35, 40),
+}
 
 
 class _TextOnlyHTML(HTMLParser):
@@ -32,7 +44,7 @@ def _plain_text(value: str) -> str:
     return " ".join(" ".join(parser.parts).split())
 
 
-def _load_question(dataset: Path, question_id: str) -> str:
+def _load_dataset_records(dataset: Path) -> list[dict[str, Any]]:
     try:
         records = json.loads(dataset.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -42,20 +54,74 @@ def _load_question(dataset: Path, question_id: str) -> str:
 
     if not isinstance(records, list):
         raise ValueError(f"Expected a JSON array of question records in {dataset}")
+    if not all(isinstance(record, dict) for record in records):
+        raise ValueError(f"Expected every record in {dataset} to be a JSON object")
+    return records
+
+
+def _validate_question_record(record: dict[str, Any], dataset: Path) -> tuple[str, str]:
+    question_id = record.get("id")
+    if not isinstance(question_id, str) or not question_id:
+        raise ValueError(f"A record in {dataset} has no non-empty string ID")
+    question = record.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError(f"Question {question_id!r} has no non-empty question text")
+    return question_id, question
+
+
+def _load_question(dataset: Path, question_id: str) -> dict[str, Any]:
+    records = _load_dataset_records(dataset)
     matches = [
         record
         for record in records
-        if isinstance(record, dict) and record.get("id") == question_id
+        if record.get("id") == question_id
     ]
     if not matches:
         raise ValueError(f"Question ID {question_id!r} was not found in {dataset}")
     if len(matches) > 1:
         raise ValueError(f"Question ID {question_id!r} occurs more than once in {dataset}")
 
-    question = matches[0].get("question")
-    if not isinstance(question, str) or not question.strip():
-        raise ValueError(f"Question {question_id!r} has no non-empty question text")
-    return question
+    _validate_question_record(matches[0], dataset)
+    return matches[0]
+
+
+def _load_batch(repo_root: Path, batch_name: str) -> list[dict[str, Any]]:
+    try:
+        filename, start, end = BATCHES[batch_name]
+    except KeyError as exc:
+        choices = ", ".join(BATCHES)
+        raise ValueError(
+            f"Unknown batch {batch_name!r}. Choose one of: {choices}"
+        ) from exc
+
+    dataset = repo_root / "data" / "golden" / filename
+    records = _load_dataset_records(dataset)
+    if len(records) < end:
+        raise ValueError(
+            f"Batch {batch_name!r} needs records {start + 1}–{end} from {dataset}, "
+            f"but it contains only {len(records)} records"
+        )
+    selected_records = records[start:end]
+    for record in selected_records:
+        _validate_question_record(record, dataset)
+    return selected_records
+
+
+def _csv_value(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def _result_path(
+    results_dir: Path,
+    batch: str | None,
+    dataset: Path | None,
+    question_id: str | None,
+) -> Path:
+    name = batch if batch else f"{dataset.stem}_{question_id}"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    return results_dir / f"{safe_name}.csv"
 
 
 def _decode_json(value: Any) -> Any:
@@ -261,12 +327,11 @@ def _remap_saved_index_settings(
     return remapped
 
 
-def _run_pipeline(
-    question: str,
+def _prepare_question_runner(
     docs_dir: Path,
     saved_settings: dict[str, Any] | None,
     saved_index: tuple[Any, ...] | None,
-) -> tuple[str, str]:
+) -> Callable[[str], tuple[str, str]]:
     from theflow.settings import settings
     from theflow.utils.modules import import_dotted_string
 
@@ -336,37 +401,45 @@ def _run_pipeline(
     if not selected_ids:
         raise RuntimeError("The PDF indexing pipeline did not index any files.")
 
-    retrievers = index.get_retriever_pipelines_for_ids(
-        effective_settings, "default", selected_ids
-    )
-    if not retrievers:
-        raise RuntimeError("The configured file index did not create a retriever.")
-
     reasoning_mode = effective_settings.get("reasoning.use")
     reasoning_cls = reasoning_registry.get(reasoning_mode)
     if reasoning_cls is None:
         raise ValueError(f"Unknown configured reasoning mode: {reasoning_mode!r}")
-    pipeline = reasoning_cls.get_pipeline(
-        effective_settings, {"app": {}, "pipeline": {}}, retrievers
-    )
 
-    answer = ""
-    citations = ""
-    for response in pipeline.stream(question, uuid.uuid4().hex, []):
-        if getattr(response, "channel", None) == "chat":
-            answer = "" if response.content is None else answer + str(response.content)
-        elif getattr(response, "channel", None) == "info":
-            citations = (
-                "" if response.content is None else citations + str(response.content)
-            )
-    return answer, citations
+    def answer_question(question: str) -> tuple[str, str]:
+        retrievers = index.get_retriever_pipelines_for_ids(
+            effective_settings, "default", selected_ids
+        )
+        if not retrievers:
+            raise RuntimeError("The configured file index did not create a retriever.")
+
+        # Build a new reasoning pipeline for every question, matching a fresh chat.
+        pipeline = reasoning_cls.get_pipeline(
+            effective_settings, {"app": {}, "pipeline": {}}, retrievers
+        )
+        answer = ""
+        citations = ""
+        for response in pipeline.stream(question, uuid.uuid4().hex, []):
+            if getattr(response, "channel", None) == "chat":
+                answer = (
+                    "" if response.content is None else answer + str(response.content)
+                )
+            elif getattr(response, "channel", None) == "info":
+                citations = (
+                    "" if response.content is None else citations + str(response.content)
+                )
+        return answer, citations
+
+    return answer_question
 
 
 def main(argv: list[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", required=True, type=Path)
-    parser.add_argument("--question-id", required=True)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--batch", choices=sorted(BATCHES))
+    mode.add_argument("--dataset", type=Path)
+    parser.add_argument("--question-id")
     parser.add_argument(
         "--user-id",
         help="Use this app user's saved Gradio settings (required if multiple users "
@@ -374,9 +447,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    dataset = args.dataset if args.dataset.is_absolute() else Path.cwd() / args.dataset
+    if args.batch:
+        if args.question_id is not None:
+            parser.error("--batch cannot be combined with --question-id")
+    elif args.dataset is None or args.question_id is None:
+        parser.error("single-question mode requires both --dataset and --question-id")
+
+    dataset: Path | None = None
     try:
-        question = _load_question(dataset, args.question_id)
+        if args.batch:
+            questions = _load_batch(repo_root, args.batch)
+        else:
+            dataset = (
+                args.dataset
+                if args.dataset.is_absolute()
+                else Path.cwd() / args.dataset
+            )
+            questions = [_load_question(dataset, args.question_id)]
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -384,6 +471,24 @@ def main(argv: list[str] | None = None) -> int:
     pdfs = sorted(docs_dir.glob("*.pdf")) if docs_dir.is_dir() else []
     if not pdfs:
         raise SystemExit(f"Error: no PDF files found in {docs_dir}")
+
+    results_dir = repo_root / "results"
+    try:
+        results_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"Error creating results directory {results_dir}: {exc}", file=sys.stderr)
+        return 1
+    result_csv = _result_path(
+        results_dir,
+        args.batch,
+        dataset,
+        None if args.batch else args.question_id,
+    )
+    source_dataset = (
+        dataset
+        if dataset is not None
+        else repo_root / "data" / "golden" / BATCHES[args.batch][0]
+    )
 
     try:
         from theflow.settings import settings
@@ -398,23 +503,66 @@ def main(argv: list[str] | None = None) -> int:
             _set_isolated_runtime_paths(settings, runtime_data)
             db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
             _seed_isolated_database(db_path, saved_tables, saved_settings)
-            answer, citations = _run_pipeline(
-                question,
+            answer_question = _prepare_question_runner(
                 docs_dir,
                 saved_settings,
                 saved_index,
             )
+            successes = 0
+            failures = 0
+            result_fields = list(
+                dict.fromkeys(
+                    key
+                    for record in questions
+                    for key in record
+                )
+            ) + ["generated_answer", "citations", "status", "error"]
+            with result_csv.open("w", encoding="utf-8", newline="") as output_file:
+                writer = csv.DictWriter(output_file, fieldnames=result_fields)
+                writer.writeheader()
+                for record in questions:
+                    question_id, question = _validate_question_record(
+                        record, source_dataset
+                    )
+                    try:
+                        answer, citations = answer_question(question)
+                        generated_answer = answer or "(Sorry, I don't know)"
+                        citation_text = _plain_text(citations)
+                        row = {
+                            **{key: _csv_value(value) for key, value in record.items()},
+                            "generated_answer": generated_answer,
+                            "citations": citation_text,
+                            "status": "success",
+                            "error": "",
+                        }
+                        successes += 1
+                        print(f"Question ID: {question_id}")
+                        print("Answer:")
+                        print(generated_answer)
+                        if citation_text:
+                            print("Citations:")
+                            print(citation_text)
+                        print()
+                    except Exception as exc:
+                        failures += 1
+                        row = {
+                            **{key: _csv_value(value) for key, value in record.items()},
+                            "generated_answer": "",
+                            "citations": "",
+                            "status": "failed",
+                            "error": str(exc),
+                        }
+                        print(f"[{question_id}] Error: {exc}", file=sys.stderr)
+                    writer.writerow(row)
+                    output_file.flush()
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print("Answer:")
-    print(answer or "(Sorry, I don't know)")
-    citation_text = _plain_text(citations)
-    if citation_text:
-        print("\nCitations:")
-        print(citation_text)
-    return 0
+    if args.batch:
+        print(f"Batch summary: {successes} succeeded, {failures} failed.")
+    print(f"Results CSV: {result_csv}")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
