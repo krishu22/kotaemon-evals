@@ -462,15 +462,20 @@ class FileIndex(BaseIndex):
     def get_retriever_pipelines(
         self, settings: dict, user_id: int, selected: Any = None
     ) -> list["BaseFileIndexRetriever"]:
-        # retrieval settings
+        selected_ids: Optional[list[str]] = self._selector_ui.get_selected_ids(
+            selected
+        )
+        return self.get_retriever_pipelines_for_ids(settings, user_id, selected_ids)
+
+    def get_retriever_pipelines_for_ids(
+        self, settings: dict, user_id: int, selected_ids: Optional[list[str]]
+    ) -> list["BaseFileIndexRetriever"]:
+        """Create retrievers when the caller already has selected source IDs."""
         prefix = f"index.options.{self.id}."
         stripped_settings = {}
         for key, value in settings.items():
             if key.startswith(prefix):
                 stripped_settings[key[len(prefix) :]] = value
-
-        # transform selected id
-        selected_ids: Optional[list[str]] = self._selector_ui.get_selected_ids(selected)
 
         retrievers = []
         for cls in self._retriever_pipeline_cls:
