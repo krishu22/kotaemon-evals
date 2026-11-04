@@ -1,0 +1,102 @@
+[
+  {
+    "id": "TARGET-01",
+    "question": "What constraint does the target-guided MEDA routing method add to guide droplets toward the target cell, and which droplets does it apply to?",
+    "golden_answer": "The method builds a distance map to the target cell. The target has distance 0, and every other cell holds the minimum number of time steps a size-1 droplet needs to reach the target. The new constraint applies when a droplet is size-1 (w = h = 1), and it applies separately to droplet A and droplet B. Between consecutive time steps t−1 and t, the distance value of the droplet's cell must drop by 0 or 1. In other words, the droplet may stay at the same distance or move exactly one step closer, and moves that lead away from the target are excluded. This narrows the ILP search space. No such constraint is applied to size-2 droplets, whose routing remains a plain ILP because shape, direction, and unavailable cells complicate it. The existing method uses constraints (1) to (19) and the proposed method adds this one as constraint (20).",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.5–6 Sec 2.2 and Fig. 5; p.6 Table 1 (Dmap); p.10 Eq. (20) and its description; p.11 constraint list for the three variants. Note: the existing method is [34] (Hamachiyo et al., ITC-CSCC 2024), not in the corpus. It is characterized only through this paper.",
+    "required_points": "1. Distance map: target = 0, entries = shortest travel time for a size-1 droplet. 2. Per-step difference in Dmap value ∈ {0, 1}. 3. Applies only to size-1 droplets, to A and B individually. 4. Purpose: remove moves away from the target and shrink the search space. 5. Size-2 droplets get no such constraint and are solved by ILP."
+  },
+  {
+    "id": "TARGET-02",
+    "question": "What solver, hardware, time limit, chip sizes, unavailable-cell rates, and number of trials were used in the target-guided routing experiments?",
+    "golden_answer": "The solver was IBM ILOG CPLEX Optimization Studio 22.1.0, run on an Intel Core i7-10700 with 64 GB of RAM. The time limit was 50,000 s of CPU time per instance. If optimality was not proven in that time, the best solution found was used, and if no solution was found, the instance is not shown in the graphs. The chips were 8×8, 10×10 and 12×12, with unavailable cells placed randomly at 10%, 20% and 30%. Each setting had 10 trials, except 12×12 with 30%, which had 20, giving 100 instances. The time-step bound was Tmax = W + H. The droplet started as a size-2 horizontal droplet with A at (1,1) and B at (2,1). The target was cell (W,H) with final shape 2×1.",
+    "question_type": "Direct retrieval",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.10–11 Sec 3.1 (setup, Table 3); p.11 time limit and solver sentences; p.11 trial counts. The 100-instance total is my sum: 8 settings × 10 + 20.",
+    "required_points": "1. CPLEX 22.1.0. 2. i7-10700, 64 GB. 3. 50,000 s CPU time limit with best-found fallback. 4. Chip sizes 8×8, 10×10, 12×12. 5. Unavailable rates 10/20/30%, random. 6. 10 trials per setting, 20 for 12×12 at 30%. 7. (Optional) Tmax = W+H and fixed start and target."
+  },
+  {
+    "id": "TARGET-03",
+    "question": "Why does the target-guided routing method reduce solving time without hurting routing quality, and what are the limits of that argument and of its splitting-at-time-step-1 variant?",
+    "golden_answer": "For size-1 droplets, the distance map gives exact shortest travel times, so forcing each move to stay at or reduce the distance keeps the droplet on shortest paths. The authors argue that this preserves solution quality (total routing time) while removing many candidate moves, which cuts solving time. Size-2 droplets are not constrained because shape, direction and unavailable cells make routing more complex, so those parts remain plain ILP. A variant (\"proposed + t1 con.\") forces both droplets to split at time step 1, so that size-1 droplets, which can follow more flexible paths, are guided by the distance map from the start. The limits are as follows. The variant fails on layouts where an initial split is impossible, which is 18 of the 100 instances, so the authors suggest choosing between the two methods by layout. Because the 50,000 s limit applied, optimality of the reported solutions was not guaranteed, and the authors list optimality-preserving speed-ups as future work. The quality argument rests on the shortest-path property for size-1 droplets and on the experimental routing times, and the paper gives no proof that the constraint never excludes an optimal combined solution (inference).",
+    "question_type": "Synthesis",
+    "answerability": "Full",
+    "difficulty": "Hard",
+    "evidence": "p.6 Sec 2.2 (rationale, quality definition); p.10 Eqs. (20)–(21) and the paragraph after (21); p.12 failure IDs; p.15 Conclusions. Failure count is mine: 2,3,4,6,11,12,15,19,25,40,48,51,66,71,76,84,85,97 = 18.",
+    "required_points": "1. Distance map guarantees shortest paths for size-1 droplets. 2. Restricting moves shrinks the search space and reduces solving time. 3. Size-2 droplets unconstrained, still ILP. 4. The t1 variant forces a split at t = 1 to apply the guidance from the start. 5. t1 variant infeasible on some layouts (18 instances), so choose by layout. 6. Time limit means optimality is not guaranteed. 7. Any \"no proof\" statement is labeled as inference."
+  },
+  {
+    "id": "TARGET-04",
+    "question": "What reduction in solving time does the target-guided routing method achieve over the existing method?",
+    "golden_answer": "The answer depends on which variant and which averaging basis is meant, and the question needs that clarification. For the proposed method, the abstract's headline is about 67.5% (Table 4, excluding the 12×12/30% cases where the existing method found no solution). Averaged over all instances, it is 37.7%. Excluding instances where splitting at time step 1 is infeasible (Table 5), the figures are 70.9% (excluding 12×12/30%) and 46.9% overall. For the variant that forces a split at t = 1, the figures are 74.5% and 45.3% (Table 4) and 73.6% and 49.7% (Table 5). The text also notes individual instances with reductions above 99%.",
+    "question_type": "Ambiguous reference",
+    "answerability": "Ambiguous",
+    "difficulty": "Medium",
+    "evidence": "p.1 Abstract; p.12 Sec 3.2 text; p.12 Table 4; p.15 Table 5; p.15 Conclusions. Derived checks: 7191.5/11538.3 gives 37.7%, and the 67.5% equals the unweighted mean of the eight per-setting reductions in Table 4, so it is an average of per-setting rates.",
+    "required_points": "1. Notes that the figure depends on variant and averaging basis, or asks for clarification. 2. Proposed: 67.5% (excl. 12×12/30%), 37.7% overall (Table 4). 3. Proposed on Table 5 (excl. t1-infeasible instances): 70.9% and 46.9%. 4. t1 variant: 74.5% / 45.3% (Table 4) and 73.6% / 49.7% (Table 5). 5. The abstract's 67.5% is the excl.-12×12/30% figure, not the overall one."
+  },
+  {
+    "id": "TARGET-05",
+    "question": "Why does the target-guided routing method always find shorter droplet routing times than the existing method on every chip configuration?",
+    "golden_answer": "The premise is wrong. The paper does not claim shorter routing times. It claims comparable routing times in most cases, with the gain being in solving time. Averages in Table 4 show a mixed picture. The proposed method is equal on 8×8 at 10% and 20%, slightly lower in five of the eight settings with existing-method results, and higher at 10×10 with 30% (17.1 vs 15.0). The overall row is 13.4 for the existing method vs 14.5 for the proposed method, and the paper says the existing method's average is deceptively low because it found no solutions for 12×12 with 30% unavailable cells, so those instances are excluded. In some instances the proposed method found a solution where the existing method found none, and in a few instances the existing method found a comparable solution faster. The averages cover different sets of solved instances (inference: the same holds for cells other than 12×12/30%, where solved counts differ), so they are not a like-for-like quality comparison.",
+    "question_type": "False premise",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.12 Sec 3.2 paragraphs on Figs. 9–10 and Table 4; p.12 Table 4 (routing columns); p.12 statement on solved counts (90/100 vs 66/100). Comparisons of per-setting routing times are mine.",
+    "required_points": "1. Corrects the premise: no claim of always-shorter routing. 2. Routing times are described as comparable in most cases. 3. Table 4 shows proposed worse at 10×10/30% and the overall row favors existing (13.4 vs 14.5). 4. The existing method's overall average excludes unsolved 12×12/30%. 5. Averages are over different solved sets, so not like-for-like (inference labeled). The assistant should not accept \"always shorter\" and should not invent a uniform improvement."
+  },
+  {
+    "id": "TARGET-06",
+    "question": "How much time does each droplet action (moving, morphing, splitting, merging, staying) cost in the shape-dependent velocity model?",
+    "golden_answer": "The corpus gives only part of this. Splitting and merging each take 1 time unit, the same as a size-1 droplet moving one cell. For movement, the text says a move shown with a blue arrow in Fig. 4 takes 1 unit and one with a yellow arrow takes 2 units, with values adopted from the literature [32]. Which direction and shape combinations are blue or yellow is shown only in the figure. Droplets can move in eight directions, and cells next to unavailable cells restrict direction. The routing time is the sum of action times for each droplet, and the longer of the two droplets' totals is taken. The corpus does not give an explicit time for staying in place (direction 0) or for morphing (direction 4). It does not say what the original velocity-model paper [32] specifies, since it is not in the corpus.",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Medium",
+    "evidence": "p.4 end of Sec 2.1 (split/merge time = 1); p.5 Fig. 4 and text (1 vs 2 units, values from [32]); p.7 Table 2 (directions 0–5) and Eq. (1) text. Unverified: exact direction-to-color mapping in Fig. 4 was not read reliably, so it is not required.",
+    "required_points": "1. Split and merge: 1 time unit each. 2. Movement costs 1 or 2 units depending on shape and direction, per Fig. 4. 3. Values taken from the literature, not derived here. 4. Time for staying in place and for morphing not stated. 5. Routing time = longer of the two droplets' summed action times. Must not assert a full cost table."
+  },
+  {
+    "id": "TARGET-07",
+    "question": "How many of the 100 routing instances hit the solver time limit, and what optimality gap remained for them?",
+    "golden_answer": "This cannot be determined from the corpus. The paper says that if the optimal solution was not found within 50,000 s, the best solution found was used, and that optimality could not be guaranteed. It does not report which instances hit the limit, per-instance optimality status, or optimality gaps. It reports solving-time bars on a log axis and states that 90 of 100 problems were solved by the proposed method versus 66 of 100 by the existing method, where \"solved\" means a solution was obtained. Some instances (for example the 12×12 ones) have no result for some methods.",
+    "question_type": "Unanswerable within topic",
+    "answerability": "Absent",
+    "difficulty": "Hard",
+    "evidence": "p.11 time-limit sentences; p.12 statement on successful solves; p.13–14 Figs. 9–10; p.15 Conclusions. Bar heights in Fig. 10 are not readable precisely and are not required.",
+    "required_points": "1. States that the count of time-limit hits and gaps are not reported. 2. Mentions the best-found-at-limit rule and 50,000 s. 3. Mentions 90/100 vs 66/100 solved. 4. Notes that optimality was not guaranteed. 5. Does not invent a count or gap."
+  },
+  {
+    "id": "TARGET-08",
+    "question": "How can I reproduce the 100 randomly generated chip layouts used in the target-guided routing experiments?",
+    "golden_answer": "The corpus supports a partial reconstruction. It gives chip sizes 8×8, 10×10 and 12×12, random unavailable-cell rates of 10%, 20% and 30%, and 10 trials per setting (20 for 12×12 at 30%). It gives the fixed start (A at (1,1), B at (2,1), a horizontal size-2 droplet), the target cell (W,H), the final droplet shape, Tmax = W + H, and constraints (1) to (21) for the three variants. It also says CPLEX 22.1.0 was used. It does not give the random generator, seeds, the actual layouts or per-instance data, the distance-map algorithm, CPLEX parameters beyond the time limit, or any code. It does not say whether layouts were screened to keep the target reachable. The Data Availability Statement says the contributions are in the article and further inquiries can go to the corresponding author. It names no repository.",
+    "question_type": "Partial answer",
+    "answerability": "Partial",
+    "difficulty": "Hard",
+    "evidence": "p.10–11 Sec 3.1 and Table 3; p.7–10 Sec 2.3; p.12 failure-ID list (instance IDs only); p.15 Data Availability Statement.",
+    "required_points": "1. Gives sizes, rates, trial counts. 2. Gives fixed start, target, Tmax. 3. Gives constraints (1) to (21) and CPLEX 22.1.0. 4. Missing: generator or seeds, layouts, code. 5. Missing: distance-map algorithm and solver settings. 6. No public data repository is named. Must not claim the authors omitted these from their implementation."
+  },
+  {
+    "id": "TARGET-09",
+    "question": "The conclusion credits the time-step-1 splitting constraint with about 5.4% less solving time than the proposed method, but the Table 4 averages suggest a bigger gap. Do these numbers reconcile?",
+    "golden_answer": "They reconcile once the instance sets are matched. The 5.4% figure compares the t1 variant's overall average solving time of 6308.1 s with the proposed method's 6666.6 s in Table 5, which excludes the 18 instances where splitting at time step 1 is infeasible (6666.6 to 6308.1 is a 5.4% reduction). Table 4's proposed average of 7191.5 s includes those instances. Against that figure, 6308.1 s would be about a 12.3% reduction, but that comparison mixes different instance sets. Average routing times for the two variants are essentially the same (14.6 vs 14.7 in Table 5), although the conclusion's \"without affecting solution quality\" is not tied to a specific table.",
+    "question_type": "Consistency check",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "p.12 text on Table 5 and the sentence about 5.4%; p.12 Table 4 \"All\" row; p.15 Table 5 \"All\" row; p.15 Conclusions. Both percentages computed by me.",
+    "required_points": "1. The 5.4% comes from Table 5 (6666.6 vs 6308.1). 2. Table 5 excludes the t1-infeasible instances. 3. Table 4's proposed average includes them, which yields a larger apparent gap (about 12%). 4. The like-for-like comparison is the Table 5 one. 5. Routing times are nearly equal (14.6 vs 14.7)."
+  },
+  {
+    "id": "TARGET-10",
+    "question": "Across the MEDA biochip papers, which optimization solvers, computing hardware, and runtime limits are reported?",
+    "golden_answer": "The splitting-aware routing study uses CPLEX 20.1.0 on an Intel Core i9-7980XE at 2.60 GHz with 128 GB, with limits of 10 h CPU time (single couple) and 50 h (multiple couples). The target-guided routing study uses CPLEX 22.1.0 on an Intel Core i7-10700 with 64 GB and a 50,000 s CPU limit (about 13.9 h, derived). Both use the best solution at the limit if optimality is not reached, and the target-guided study omits instances with no result. The online-synthesis study uses no solver. It implements all methods in Python on an octa-core Intel Xeon with 32 GB under 64-bit Ubuntu and states no time limit. The RLPM study also uses no solver. It trains a DQN for 3,000 episodes on a 3.70 GHz Intel Xeon with 32 GB under 64-bit Windows 10. It states no GPU or software framework. It reports RLPM runtimes of 0.57–1.52 h across five T7 runs, about 1.5 h in the worst case.",
+    "required_points": "1. Shiro: CPLEX 20.1.0, i9-7980XE, 128 GB, 10 h / 50 h. 2. Hamachiyo: CPLEX 22.1.0, i7-10700, 64 GB, 50,000 s. 3. Mandal: no solver, Python, octa-core Xeon, 32 GB, Ubuntu. 4. RLPM: no solver, 3.70 GHz Xeon, 32 GB, Windows 10, ~1.5 h worst-case training. 5. Best-at-limit rule for the two CPLEX studies.",
+    "question_type": "Synthesis (cross-paper)",
+    "answerability": "Full",
+    "difficulty": "Medium",
+    "evidence": "Shiro p.9; Hamachiyo p.11; Mandal 24:24 Sec 7; RLPM 6:17 Sec 7, 6:19 runtime paragraph. The hours conversion is mine."
+  }
+]
