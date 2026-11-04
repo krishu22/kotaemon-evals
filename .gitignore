@@ -484,6 +484,4 @@ gradio_tmp/
 !.env.example
 .venv/
 ktem_app_data/
-data/raw/
-data/documents/
 results/
