@@ -140,7 +140,10 @@ class DocumentRetrievalPipeline(BaseFileIndexRetriever):
 
         print("searching in doc_ids", doc_ids)
         if not doc_ids:
-            logger.info(f"Skip retrieval because of no selected files: {self}")
+            logger.info(
+                "Skip retrieval because of no selected files: %s",
+                type(self).__name__,
+            )
             return []
 
         retrieval_kwargs: dict = {}
