@@ -38,6 +38,10 @@ class _TextOnlyHTML(HTMLParser):
         self.parts.append(data)
 
 
+class EvidenceCaptured(Exception):
+    """Signal that a caller requested evidence capture before answer generation."""
+
+
 def _plain_text(value: str) -> str:
     parser = _TextOnlyHTML()
     parser.feed(value)
@@ -331,6 +335,9 @@ def _prepare_question_runner(
     docs_dir: Path,
     saved_settings: dict[str, Any] | None,
     saved_index: tuple[Any, ...] | None,
+    evidence_callback: Callable[
+        [list[Any], Any, list[Any], int], None
+    ] | None = None,
 ) -> Callable[[str], tuple[str, str]]:
     from theflow.settings import settings
     from theflow.utils.modules import import_dotted_string
@@ -339,6 +346,7 @@ def _prepare_question_runner(
     from ktem.llms.manager import llms
     from ktem.rerankings.manager import reranking_models_manager
     from ktem.index.file.index import FileIndex
+    from kotaemon.indices.qa.format_context import PrepareEvidencePipeline
 
     if not llms.options():
         raise ValueError("No LLM is configured. Configure one in Kotaemon Resources.")
@@ -417,6 +425,34 @@ def _prepare_question_runner(
         pipeline = reasoning_cls.get_pipeline(
             effective_settings, {"app": {}, "pipeline": {}}, retrievers
         )
+        if evidence_callback is not None:
+            evidence_pipeline = getattr(pipeline, "evidence_pipeline", None)
+            if not isinstance(evidence_pipeline, PrepareEvidencePipeline):
+                raise ValueError(
+                    "The configured reasoning pipeline does not expose a "
+                    "PrepareEvidencePipeline for pre-generation evidence capture."
+                )
+
+            class _CapturingEvidencePipeline(PrepareEvidencePipeline):
+                callback: Callable[[list[Any], Any, list[Any], int], None]
+                retrievers: list[Any]
+
+                def run(self, docs: list[Any]) -> Any:
+                    prepared = super().run(docs)
+                    self.callback(
+                        docs,
+                        prepared.content,
+                        self.retrievers,
+                        self.max_context_length,
+                    )
+                    raise EvidenceCaptured
+
+            pipeline.evidence_pipeline = _CapturingEvidencePipeline(
+                max_context_length=evidence_pipeline.max_context_length,
+                trim_func=evidence_pipeline.trim_func,
+                callback=evidence_callback,
+                retrievers=retrievers,
+            )
         answer = ""
         citations = ""
         for response in pipeline.stream(question, uuid.uuid4().hex, []):
