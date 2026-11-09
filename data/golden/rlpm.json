@@ -237,7 +237,13 @@
     "question_type": "Partial information",
     "answerability": "Partial",
     "difficulty": "Medium",
-    "evidence": "P1: p.511 Table 1 footnote. P2: 6:7 Table 1 footnote; 6:6 §3.1; 6:13 Fig. 8(a)."
+    "evidence": "P1: p.511 Table 1 footnote. P2: 6:7 Table 1 footnote; 6:6 §3.1; 6:13 Fig. 8(a).",
+    "retrieval_claims": [
+      {
+    "id": "RLPM-24-C02",
+    "claim": "The heating and cooling times are predefined in each sequencing graph and are bioprotocol-dependent."
+  }
+    ]
   },
   {
     "id": "RLPM-25",
@@ -379,7 +385,13 @@
     "id": "RLPM-39",
     "question": "What dimensions does Table 1 list for the detector module (M₆)?",
     "golden_answer": "3 × 3 unit cells.",
-    "evidence": "Table 1, M₆ row"
+    "evidence": "Table 1, M₆ row",
+    "retrieval_claims": [
+      {
+        "id": "RLPM-39-C01",
+        "claim": "The dimensions listed for the detector module (M₆) in Table 1 are 3 × 3 unit cells."
+      }
+    ]
   },
   {
     "id": "RLPM-40",
