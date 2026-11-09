@@ -80,23 +80,40 @@ included in this retrieval judgment.
 
 ## Running retrieval evaluation end to end
 
-Run the evaluation for explicitly selected question IDs. The Kotaemon index is
-initialized once for the run, and the golden dataset is never modified:
+Run every entry in a golden dataset by omitting `--question-ids`. A bare
+filename such as `rlpm.json` resolves under `data/golden/`; a path such as
+`data/golden/rlpm.json` is resolved from the repository root. Kotaemon and its
+index are initialized once for the run, and the golden dataset is never
+modified:
+
+```bash
+python -m evals.retriever.run_eval \
+  --dataset rlpm.json \
+  --output-dir results/retriever/rlpm_full
+```
+
+To run only a subset, supply the IDs. Their output order follows the requested
+ID order:
 
 ```bash
 python -m evals.retriever.run_eval \
   --dataset data/golden/rlpm.json \
   --question-ids RLPM-38 RLPM-40 RLPM-07 \
-  --k 5 \
-  --output-dir results/retriever/rlpm_run
+  --output-dir results/retriever/rlpm_subset
 ```
 
 Stored `retrieval_claims` are used as-is, including an empty list. When the
 field is absent, the configured model generates draft claims for that run
-only. Each question gets an evidence dump and a result JSON; `summary.json`
-records its status, scores, artifact paths, and any failed stage. Use
+only. Each question gets one `<question-id>_evaluation.json` containing the
+complete `evidence_dump` and `evaluation` objects; `summary.json` records its
+status, scores, artifact paths, and any failed stage. Evidence and evaluation
+details are kept in full in their respective objects. Use
 `--model` to override the default `gpt-4o-mini`. Omit `--k` to score all
 chunks visible in the final context, or pass a positive `--k` such as `--k 5`
 to score only the first five ranks. Results record `evaluation_mode`,
 `evaluation_k` (`null` in all-chunks mode), evaluated chunk count, and the
 precision denominator separately from Kotaemon's configured retrieval limit.
+Each run writes one combined JSON artifact per question plus `summary.json`
+under the output directory. The summary includes total/completed/failed counts
+and macro-average recall and precision, with a contributor count for each
+metric.
