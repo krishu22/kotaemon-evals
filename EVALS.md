@@ -68,7 +68,35 @@ python -m evals.retriever.judge_evidence \
 
 The judge uses the first `k` mapped chunks per saved rank order, makes one
 structured OpenAI call per non-empty claim list, and calculates recall and
-precision in Python. It does not rerun or reindex Kotaemon. The RLPM-24 pilot
+precision in Python. Omit `--k` to evaluate every chunk whose mapped text is
+visible in the saved final context; its precision denominator is the number of
+chunks evaluated. With `--k`, precision uses that requested value as the
+denominator. Reports identify the mode (`all_final` or `top_k`), requested
+`evaluation_k`, evaluated chunk count, and precision denominator. The judge
+does not rerun or reindex Kotaemon. The RLPM-24 pilot
 preflight requires its reviewed claims to contain only the positive
 bioprotocol/sequencing-graph statement; corpus-omission claims must not be
 included in this retrieval judgment.
+
+## Running retrieval evaluation end to end
+
+Run the evaluation for explicitly selected question IDs. The Kotaemon index is
+initialized once for the run, and the golden dataset is never modified:
+
+```bash
+python -m evals.retriever.run_eval \
+  --dataset data/golden/rlpm.json \
+  --question-ids RLPM-38 RLPM-40 RLPM-07 \
+  --k 5 \
+  --output-dir results/retriever/rlpm_run
+```
+
+Stored `retrieval_claims` are used as-is, including an empty list. When the
+field is absent, the configured model generates draft claims for that run
+only. Each question gets an evidence dump and a result JSON; `summary.json`
+records its status, scores, artifact paths, and any failed stage. Use
+`--model` to override the default `gpt-4o-mini`. Omit `--k` to score all
+chunks visible in the final context, or pass a positive `--k` such as `--k 5`
+to score only the first five ranks. Results record `evaluation_mode`,
+`evaluation_k` (`null` in all-chunks mode), evaluated chunk count, and the
+precision denominator separately from Kotaemon's configured retrieval limit.

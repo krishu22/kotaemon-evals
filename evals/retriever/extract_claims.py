@@ -62,6 +62,19 @@ class ClaimExtraction(BaseModel):
     )
 
 
+def _create_openai_client() -> OpenAI:
+    api_key = config("OPENAI_API_KEY", default="")
+    if not api_key or api_key == "<YOUR_OPENAI_KEY>":
+        raise ValueError(
+            "OPENAI_API_KEY is not configured in the environment or .env"
+        )
+    base_url = (
+        config("OPENAI_API_BASE", default="")
+        or "https://api.openai.com/v1"
+    )
+    return OpenAI(api_key=api_key, base_url=base_url)
+
+
 def _normalize_claim(claim: str) -> str:
     return " ".join(claim.casefold().split()).strip(" .")
 
@@ -416,17 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             _, selected_records = _load_selected_records(
                 dataset_path, question_ids
             )
-            api_key = config("OPENAI_API_KEY", default="")
-            if not api_key or api_key == "<YOUR_OPENAI_KEY>":
-                raise ValueError(
-                    "OPENAI_API_KEY is not configured in the environment "
-                    "or .env"
-                )
-            base_url = (
-                config("OPENAI_API_BASE", default="")
-                or "https://api.openai.com/v1"
-            )
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            client = _create_openai_client()
             claim_lists = [
                 _request_claims(client, args.model, record)
                 for record in selected_records

@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import html
 import json
 import sys
 import tempfile
 from numbers import Real
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Generator
 
 import tiktoken
 
@@ -240,6 +241,71 @@ def _build_dump(
     }
 
 
+@contextmanager
+def evidence_capture_session(
+    docs_dir: Path, user_id: str | None = None
+) -> Generator[Callable[[str, str], dict[str, Any]], None, None]:
+    from theflow.settings import settings
+
+    saved_tables, saved_settings, saved_index = _read_saved_app_config(
+        settings.KH_DATABASE,
+        user_id,
+        getattr(settings, "KH_FEATURE_USER_MANAGEMENT", False),
+    )
+    with tempfile.TemporaryDirectory(
+        prefix="kotaemon-evidence-inspect-"
+    ) as temp_dir:
+        runtime_data = Path(temp_dir)
+        _set_isolated_runtime_paths(settings, runtime_data)
+        db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
+        _seed_isolated_database(db_path, saved_tables, saved_settings)
+        current_question: dict[str, str] = {}
+        capture: dict[str, Any] = {}
+
+        def save_evidence(
+            docs: list[Any],
+            prepared_content: Any,
+            retrievers: list[Any],
+            context_limit: int,
+        ) -> None:
+            capture.update(
+                _build_dump(
+                    current_question["id"],
+                    current_question["question"],
+                    docs,
+                    prepared_content,
+                    retrievers,
+                    context_limit,
+                )
+            )
+
+        answer_question = _prepare_question_runner(
+            docs_dir,
+            saved_settings,
+            saved_index,
+            evidence_callback=save_evidence,
+        )
+
+        def capture_question(question_id: str, question: str) -> dict[str, Any]:
+            current_question.update(id=question_id, question=question)
+            capture.clear()
+            try:
+                answer_question(question)
+            except EvidenceCaptured:
+                if not capture:
+                    raise RuntimeError(
+                        "Kotaemon stopped at evidence capture without producing "
+                        "an evidence dump."
+                    )
+                return dict(capture)
+            raise RuntimeError(
+                "The reasoning pipeline finished without stopping at the "
+                "pre-generation evidence capture point."
+            )
+
+        yield capture_question
+
+
 def main(argv: list[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(
@@ -284,54 +350,8 @@ def main(argv: list[str] | None = None) -> int:
         if not docs_dir.is_dir() or not any(docs_dir.glob("*.pdf")):
             raise ValueError(f"No PDF files found in {docs_dir}")
 
-        from theflow.settings import settings
-
-        saved_tables, saved_settings, saved_index = _read_saved_app_config(
-            settings.KH_DATABASE,
-            args.user_id,
-            getattr(settings, "KH_FEATURE_USER_MANAGEMENT", False),
-        )
-        with tempfile.TemporaryDirectory(
-            prefix="kotaemon-evidence-inspect-"
-        ) as temp_dir:
-            runtime_data = Path(temp_dir)
-            _set_isolated_runtime_paths(settings, runtime_data)
-            db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
-            _seed_isolated_database(db_path, saved_tables, saved_settings)
-            capture: dict[str, Any] = {}
-
-            def save_evidence(
-                docs: list[Any],
-                prepared_content: Any,
-                retrievers: list[Any],
-                context_limit: int,
-            ) -> None:
-                capture.update(
-                    _build_dump(
-                        question_id,
-                        question,
-                        docs,
-                        prepared_content,
-                        retrievers,
-                        context_limit,
-                    )
-                )
-
-            answer_question = _prepare_question_runner(
-                docs_dir,
-                saved_settings,
-                saved_index,
-                evidence_callback=save_evidence,
-            )
-            try:
-                answer_question(question)
-            except EvidenceCaptured:
-                pass
-            else:
-                raise RuntimeError(
-                    "The reasoning pipeline finished without stopping at the "
-                    "pre-generation evidence capture point."
-                )
+        with evidence_capture_session(docs_dir, args.user_id) as capture_question:
+            capture = capture_question(question_id, question)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(

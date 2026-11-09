@@ -11,15 +11,14 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
-from decouple import config
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
+from evals.retriever.extract_claims import _create_openai_client
 from scripts.run_rag_eval import _load_dataset_records
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
-DEFAULT_K = 5
 PILOT_QUESTION_IDS = ("RLPM-39", "RLPM-24")
 
 SYSTEM_PROMPT = """\
@@ -172,7 +171,7 @@ def _visible_chunk_text(
 
 
 def _select_evidence(
-    question_id: str, dump: dict[str, Any], k: int
+    question_id: str, dump: dict[str, Any], k: int | None
 ) -> tuple[list[dict[str, Any]], int]:
     ranked_chunks = dump.get("ranked_chunks")
     final_context_data = dump.get("final_context")
@@ -206,9 +205,16 @@ def _select_evidence(
         ordered_chunks.append((position, chunk))
     ordered_chunks.sort(key=lambda pair: pair[1]["rank"])
 
-    selected_pairs = ordered_chunks[:k]
+    selected_pairs = ordered_chunks if k is None else ordered_chunks[:k]
     selected = []
     for _, chunk in selected_pairs:
+        mapping = chunk.get("final_context_mapping")
+        if (
+            k is None
+            and isinstance(mapping, dict)
+            and mapping.get("status") == "not_found"
+        ):
+            continue
         visible_text = _visible_chunk_text(chunk, final_context, question_id)
         selected.append({"rank": chunk["rank"], "text": visible_text})
     return selected, len(ranked_chunks)
@@ -316,7 +322,8 @@ def _judge_question(
 def _score(
     claims: list[dict[str, str]],
     verdicts: list[dict[str, Any]],
-    k: int,
+    k: int | None,
+    evaluated_chunk_count: int,
 ) -> dict[str, Any] | None:
     if not claims:
         return None
@@ -335,12 +342,20 @@ def _score(
             for rank in verdict["ranks"]
         }
     )
+    precision_denominator = (
+        k if k is not None else evaluated_chunk_count
+    )
     metrics = {
         "claim_recall_at_k": supported_count / len(claims),
         "fully_supported_claim_count": supported_count,
         "partial_claim_count": partial_count,
         "claim_count": len(claims),
-        "chunk_precision_at_k": len(useful_ranks) / k,
+        "chunk_precision_at_k": (
+            len(useful_ranks) / precision_denominator
+            if precision_denominator > 0
+            else None
+        ),
+        "precision_denominator": precision_denominator or None,
         "useful_ranks": useful_ranks,
     }
     return metrics
@@ -410,7 +425,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Saved evidence JSON dumps, one per selected question.",
     )
     parser.add_argument("--report", type=Path, required=True)
-    parser.add_argument("--k", type=int, default=DEFAULT_K)
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=None,
+        metavar="K",
+        help=(
+            "Evaluate only the first K ranked chunks (positive integer). "
+            "Omit to evaluate all chunks represented in the saved final context."
+        ),
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL)
     args = parser.parse_args(argv)
 
@@ -422,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
     report_path = (
         args.report if args.report.is_absolute() else Path.cwd() / args.report
     )
-    if args.k < 1:
+    if args.k is not None and args.k < 1:
         parser.error("--k must be a positive integer")
     if len(args.question_ids) != len(set(args.question_ids)):
         parser.error("--question-ids must not contain duplicates")
@@ -510,28 +534,22 @@ def main(argv: list[str] | None = None) -> int:
             selected_by_id[question_id] = selected
             available_by_id[question_id] = available
 
-        has_claims = any(claims_by_id.values())
+        has_judged_claims = any(
+            claims_by_id[question_id] and selected_by_id[question_id]
+            for question_id in args.question_ids
+        )
         client = None
-        if has_claims:
-            api_key = config("OPENAI_API_KEY", default="")
-            if not api_key or api_key == "<YOUR_OPENAI_KEY>":
-                raise ValueError(
-                    "OPENAI_API_KEY is not configured in the environment "
-                    "or .env"
-                )
-            base_url = (
-                config("OPENAI_API_BASE", default="")
-                or "https://api.openai.com/v1"
-            )
-            client = OpenAI(api_key=api_key, base_url=base_url)
+        if has_judged_claims:
+            client = _create_openai_client()
 
         results = []
+        evaluation_mode = "top_k" if args.k is not None else "all_final"
         for question_id in args.question_ids:
             record = records_by_id[question_id]
             dump = dumps_by_id[question_id]
             claims = claims_by_id[question_id]
             selected = selected_by_id[question_id]
-            if claims:
+            if claims and selected:
                 if client is None:
                     raise RuntimeError(
                         "OpenAI client was not initialized for "
@@ -545,12 +563,23 @@ def main(argv: list[str] | None = None) -> int:
                     selected,
                     question_id,
                 )
-                metrics = _score(claims, verdicts, args.k)
                 judge_called = True
+            elif claims:
+                verdicts = [
+                    {
+                        "claim_id": claim["id"],
+                        "verdict": "unsupported",
+                        "ranks": [],
+                    }
+                    for claim in claims
+                ]
+                judge_called = False
             else:
                 verdicts = []
-                metrics = None
                 judge_called = False
+            metrics = _score(
+                claims, verdicts, args.k, len(selected)
+            )
 
             verdict_by_id = {
                 verdict["claim_id"]: verdict for verdict in verdicts
@@ -562,9 +591,14 @@ def main(argv: list[str] | None = None) -> int:
                     "original_retrieval_limit": _original_retrieval_limit(
                         dump
                     ),
+                    "evaluation_mode": evaluation_mode,
                     "evaluation_k": args.k,
                     "available_chunk_count": available_by_id[question_id],
                     "evaluated_chunk_count": len(selected),
+                    "precision_denominator": (
+                        args.k if args.k is not None else len(selected)
+                    )
+                    or None,
                     "judge_called": judge_called,
                     "verdicts": [
                         {
@@ -600,12 +634,18 @@ def main(argv: list[str] | None = None) -> int:
 
         report = {
             "model": args.model,
+            "evaluation_mode": evaluation_mode,
             "evaluation_k": args.k,
             "dataset": str(dataset_path),
             "results": results,
         }
         _write_report(report_path, report)
-        print(f"Model: {args.model} | evaluation k: {args.k}")
+        evaluation_summary = (
+            f"top {args.k}"
+            if args.k is not None
+            else "all visible final-context chunks"
+        )
+        print(f"Model: {args.model} | evaluation mode: {evaluation_summary}")
         for result in results:
             if result["claim_recall_at_k"] is None:
                 recall_summary = "claim recall: null (no claims)"
