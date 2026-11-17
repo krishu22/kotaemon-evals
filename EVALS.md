@@ -9,6 +9,28 @@ citation support, and abstention using a reviewed QASPER subset.
 Paper content is indexed in Kotaemon. Reference answers and evaluation
 annotations are kept outside the application's retrieval corpus.
 
+## Running RAG triad evaluations
+
+With the project virtual environment active, evaluate one question:
+
+```bash
+python -m evals.pipeline.run_eval \
+  --dataset data/golden/rlpm.json \
+  --question-id RLPM-39
+```
+
+Use `--question-ids ID [ID ...]` to select a subset, or omit both question
+selection options to evaluate every entry in the dataset in file order. Each
+invocation initializes Kotaemon and indexes the PDFs once. Supported golden
+datasets include `aop.json`, `rlpm.json`, `shiro.json`, and `target.json`.
+
+The runner captures the context and answer from the same Kotaemon pipeline
+execution, then reports DeepEval's contextual relevancy, faithfulness, and
+answer relevancy scores using `gpt-4o-mini`. The evaluation is text-only; it
+reports when Kotaemon also supplied images to the generator. `--output-dir`
+writes one result JSON per question and, for batch runs, a `summary.json` with
+question statuses and per-metric means. Omit it for console-only output.
+
 ## Inspecting retrieved evidence
 
 From the repository root with the project virtual environment active, inspect

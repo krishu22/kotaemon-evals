@@ -18,8 +18,9 @@ dynamic = ["version"]
 requires-python = ">= 3.10"
 description = "Kotaemon App"
 dependencies = [
+    "deepeval>=2.5.0,<2.6",
     "kotaemon[all]",
-    "ktem"
+    "ktem",
 ]
 authors = [
     { name = "@trducng", email = "john@cinnamon.is" },
