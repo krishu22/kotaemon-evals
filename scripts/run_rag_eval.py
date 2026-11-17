@@ -338,6 +338,7 @@ def _prepare_question_runner(
     evidence_callback: Callable[
         [list[Any], Any, list[Any], int], None
     ] | None = None,
+    stop_after_evidence: bool = True,
 ) -> Callable[[str], tuple[str, str]]:
     from theflow.settings import settings
     from theflow.utils.modules import import_dotted_string
@@ -436,6 +437,7 @@ def _prepare_question_runner(
             class _CapturingEvidencePipeline(PrepareEvidencePipeline):
                 callback: Callable[[list[Any], Any, list[Any], int], None]
                 retrievers: list[Any]
+                stop_after_evidence: bool
 
                 def run(self, docs: list[Any]) -> Any:
                     prepared = super().run(docs)
@@ -445,13 +447,16 @@ def _prepare_question_runner(
                         self.retrievers,
                         self.max_context_length,
                     )
-                    raise EvidenceCaptured
+                    if self.stop_after_evidence:
+                        raise EvidenceCaptured
+                    return prepared
 
             pipeline.evidence_pipeline = _CapturingEvidencePipeline(
                 max_context_length=evidence_pipeline.max_context_length,
                 trim_func=evidence_pipeline.trim_func,
                 callback=evidence_callback,
                 retrievers=retrievers,
+                stop_after_evidence=stop_after_evidence,
             )
         answer = ""
         citations = ""

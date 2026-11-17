@@ -9,6 +9,22 @@ citation support, and abstention using a reviewed QASPER subset.
 Paper content is indexed in Kotaemon. Reference answers and evaluation
 annotations are kept outside the application's retrieval corpus.
 
+## Running a single RAG triad evaluation
+
+With the project virtual environment active, evaluate one question using
+Kotaemon's generated answer and its final, trimmed generator context:
+
+```bash
+python -m evals.pipeline.run_eval \
+  --dataset data/golden/rlpm.json \
+  --question-id RLPM-39
+```
+
+The runner captures the context and answer from the same Kotaemon pipeline
+execution, then reports DeepEval's contextual relevancy, faithfulness, and
+answer relevancy scores using `gpt-4o-mini`. The evaluation is text-only; it
+reports when Kotaemon also supplied images to the generator.
+
 ## Inspecting retrieved evidence
 
 From the repository root with the project virtual environment active, inspect
