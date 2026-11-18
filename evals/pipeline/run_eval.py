@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+from contextvars import copy_context
 from importlib.metadata import version
 import json
 import re
 import sys
 import tempfile
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Generator, Iterator
 
 from scripts.run_rag_eval import (
     _load_dataset_records,
@@ -74,13 +77,327 @@ def _write_result(path: Path | None, result: dict[str, Any]) -> None:
     )
 
 
-def _sanitize_error(exc: Exception, api_key: str) -> str:
+def _sanitize_error(exc: Exception, *api_keys: str) -> str:
     message = str(exc)
-    if api_key:
-        message = message.replace(api_key, "[REDACTED]")
+    for secret in api_keys:
+        if secret:
+            message = message.replace(secret, "[REDACTED]")
     message = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED]", message)
     message = re.sub(r"\s+", " ", message).strip()
     return f"{type(exc).__name__}: {message}"
+
+
+def _trace_model_name(model: Any) -> str | None:
+    if model is None:
+        return None
+    for attribute in ("model", "model_name", "deployment_name"):
+        value = getattr(model, attribute, None)
+        if value:
+            return str(value)
+    kwargs = getattr(model, "_kwargs", {})
+    if isinstance(kwargs, dict):
+        for attribute in ("model", "model_name", "deployment_name"):
+            if kwargs.get(attribute):
+                return str(kwargs[attribute])
+    return type(model).__name__
+
+
+def _trace_component_method(
+    component: Any,
+    method_name: str,
+    *,
+    name: str,
+    client: Any,
+    process_inputs: Callable[[dict[str, Any]], dict[str, Any]],
+    process_outputs: Callable[[Any], Any] | None = None,
+    reduce_fn: Callable[[Iterator[Any]], Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    from langsmith import traceable
+
+    original = getattr(component, method_name)
+    traced = traceable(
+        name=name,
+        run_type="chain",
+        client=client,
+        process_inputs=process_inputs,
+        process_outputs=process_outputs,
+        reduce_fn=reduce_fn,
+        metadata=metadata,
+    )(original)
+    object.__setattr__(component, method_name, traced)
+
+
+def _instrument_pipeline(pipeline: Any, client: Any) -> list[str]:
+    retrieval = getattr(pipeline, "retrieve", None)
+    evidence_pipeline = getattr(pipeline, "evidence_pipeline", None)
+    answering_pipeline = getattr(pipeline, "answering_pipeline", None)
+    if retrieval is None or evidence_pipeline is None or answering_pipeline is None:
+        raise ValueError(
+            "LangSmith tracing requires a pipeline with retrieval, evidence, "
+            "and answering stages."
+        )
+
+    generator_name = _trace_model_name(getattr(answering_pipeline, "llm", None))
+    model_names = [generator_name] if generator_name else []
+    _trace_component_method(
+        pipeline,
+        "retrieve",
+        name="retrieval",
+        client=client,
+        process_inputs=lambda inputs: {
+            "query": inputs.get("message"),
+            "history": inputs.get("history", []),
+        },
+        process_outputs=lambda output: {
+            "retrieved_document_count": len(output[0]),
+            "document_ids": [
+                str(doc.doc_id) for doc in output[0] if getattr(doc, "doc_id", None)
+            ],
+        },
+    )
+    _trace_component_method(
+        evidence_pipeline,
+        "run",
+        name="evidence preparation",
+        client=client,
+        process_inputs=lambda inputs: {
+            "retrieved_document_count": len(inputs.get("docs", [])),
+        },
+        process_outputs=lambda output: {
+            "evidence_mode": output.content[0],
+            "final_context": output.content[1],
+            "image_count": len(output.content[2]),
+        },
+    )
+
+    def reduce_generation(chunks: Iterator[Any]) -> dict[str, str]:
+        answer = "".join(
+            str(chunk.content)
+            for chunk in chunks
+            if getattr(chunk, "channel", None) == "chat" and chunk.content is not None
+        )
+        return {"generated_answer": answer}
+
+    _trace_component_method(
+        answering_pipeline,
+        "stream",
+        name="generation",
+        client=client,
+        process_inputs=lambda inputs: {
+            key: inputs[key]
+            for key in ("question", "evidence", "evidence_mode")
+            if key in inputs
+        },
+        reduce_fn=reduce_generation,
+        metadata={"model_names": model_names},
+    )
+    return model_names
+
+
+@contextmanager
+def _instrument_generation_clients(client: Any) -> Generator[None, None, None]:
+    from langsmith import traceable
+    from langsmith.wrappers import wrap_openai
+    from kotaemon.llms.chats.langchain_based import LCChatMixin
+    from kotaemon.llms.chats.openai import AzureChatOpenAI, ChatOpenAI
+
+    patched: list[tuple[type, str, Any]] = []
+
+    def patch(cls: type, method_name: str, replacement: Callable[..., Any]) -> None:
+        original = getattr(cls, method_name)
+        patched.append((cls, method_name, original))
+        setattr(cls, method_name, replacement(original))
+
+    def wrap_prepare_client(original: Callable[..., Any]) -> Callable[..., Any]:
+        def prepare_client(self: Any, *args: Any, **kwargs: Any) -> Any:
+            return wrap_openai(original(self, *args, **kwargs))
+
+        return prepare_client
+
+    def wrap_openai_response(original: Callable[..., Any]) -> Callable[..., Any]:
+        def openai_response(self: Any, client_: Any, **kwargs: Any) -> Any:
+            if kwargs.get("stream") and self.base_url in (
+                None,
+                "https://api.openai.com/v1",
+            ):
+                kwargs.setdefault("stream_options", {"include_usage": True})
+            return original(self, client_, **kwargs)
+
+        return openai_response
+
+    for cls in (ChatOpenAI, AzureChatOpenAI):
+        patch(cls, "prepare_client", wrap_prepare_client)
+    patch(ChatOpenAI, "openai_response", wrap_openai_response)
+
+    def langchain_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+        model = inputs.get("self")
+        return {
+            "model_name": _trace_model_name(model),
+            "messages": inputs.get("messages"),
+        }
+
+    def langchain_outputs(output: Any) -> dict[str, Any]:
+        if isinstance(output, dict):
+            return output
+        content = getattr(output, "content", None)
+        if content is None:
+            content = getattr(output, "text", "")
+        result: dict[str, Any] = {"content": content}
+        prompt_tokens = getattr(output, "prompt_tokens", -1)
+        completion_tokens = getattr(output, "completion_tokens", -1)
+        total_tokens = getattr(output, "total_tokens", -1)
+        if prompt_tokens >= 0 and completion_tokens >= 0:
+            result["usage_metadata"] = {
+                "input_tokens": prompt_tokens,
+                "output_tokens": completion_tokens,
+                "total_tokens": (
+                    total_tokens
+                    if total_tokens >= 0
+                    else prompt_tokens + completion_tokens
+                ),
+            }
+        return result
+
+    def reduce_langchain_stream(chunks: Iterator[Any]) -> dict[str, Any]:
+        return {
+            "content": "".join(
+                str(chunk.content)
+                for chunk in chunks
+                if getattr(chunk, "content", None) is not None
+            )
+        }
+
+    def wrap_langchain_method(
+        *, is_stream: bool = False
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        def wrap(original: Callable[..., Any]) -> Callable[..., Any]:
+            traced = traceable(
+                name="LangChain generation",
+                run_type="llm",
+                client=client,
+                process_inputs=langchain_inputs,
+                process_outputs=langchain_outputs,
+                reduce_fn=reduce_langchain_stream if is_stream else None,
+            )(original)
+
+            def invoke(self: Any, *args: Any, **kwargs: Any) -> Any:
+                extra = {
+                    "metadata": {"model_name": _trace_model_name(self)},
+                }
+                return traced(self, *args, langsmith_extra=extra, **kwargs)
+
+            if is_stream:
+
+                def stream(self: Any, *args: Any, **kwargs: Any) -> Any:
+                    extra = {
+                        "metadata": {"model_name": _trace_model_name(self)},
+                    }
+                    return traced(self, *args, langsmith_extra=extra, **kwargs)
+
+                return stream
+            return invoke
+
+        return wrap
+
+    for method_name in ("invoke", "ainvoke"):
+        patch(LCChatMixin, method_name, wrap_langchain_method())
+    for method_name in ("stream", "astream"):
+        patch(LCChatMixin, method_name, wrap_langchain_method(is_stream=True))
+
+    try:
+        yield
+    finally:
+        for cls, method_name, original in reversed(patched):
+            setattr(cls, method_name, original)
+
+
+@contextmanager
+def _propagate_trace_context_to_threads() -> Generator[None, None, None]:
+    original_start = threading.Thread.start
+
+    def start_with_context(thread: threading.Thread, *args: Any, **kwargs: Any) -> None:
+        context = copy_context()
+        original_run = thread.run
+
+        def run_in_context(*run_args: Any, **run_kwargs: Any) -> Any:
+            return context.run(original_run, *run_args, **run_kwargs)
+
+        setattr(thread, "run", run_in_context)
+        original_start(thread, *args, **kwargs)
+
+    setattr(threading.Thread, "start", start_with_context)
+    try:
+        yield
+    finally:
+        setattr(threading.Thread, "start", original_start)
+
+
+def _run_traced_question(
+    question: str,
+    question_id: str,
+    dataset: Path,
+    answer_question: Callable[[str], tuple[str, str]],
+    capture_target: dict[str, Any],
+    client: Any,
+    project_name: str,
+    result: dict[str, Any],
+    result_path: Path | None,
+) -> tuple[str, str]:
+    from langsmith import traceable, tracing_context
+    from langsmith.run_helpers import get_current_run_tree
+
+    @traceable(
+        name="Kotaemon request",
+        run_type="chain",
+        client=client,
+        project_name=project_name,
+        process_inputs=lambda inputs: {
+            "query": inputs["question"],
+            "question_id": inputs["question_id"],
+            "dataset": inputs["dataset_path"],
+        },
+    )
+    def run_request(
+        question: str, question_id: str, dataset_path: str
+    ) -> dict[str, Any]:
+        root_run = get_current_run_tree()
+        if root_run is None:
+            raise RuntimeError("LangSmith did not create the application root trace.")
+        capture_target["trace_root"] = root_run
+        generated_answer, citations = answer_question(question)
+        if "final_context" not in capture_target:
+            raise RuntimeError(
+                "Kotaemon completed without capturing its final generator context."
+            )
+        return {
+            "query": question,
+            "question_id": question_id,
+            "dataset": dataset_path,
+            "final_context": capture_target["final_context"],
+            "generated_answer": generated_answer,
+            "model_names": capture_target.get("model_names", []),
+            "citations": citations,
+        }
+
+    try:
+        with tracing_context(
+            enabled=True,
+            client=client,
+            project_name=project_name,
+            metadata={"question_id": question_id, "dataset": str(dataset)},
+        ):
+            output = run_request(question, question_id, str(dataset))
+        return output["generated_answer"], output["citations"]
+    finally:
+        root_run = capture_target.get("trace_root")
+        if root_run is not None:
+            result["application_trace_id"] = str(root_run.id)
+            result["application_trace_url"] = client.get_run_url(
+                run=root_run,
+                project_name=project_name,
+            )
+            _write_result(result_path, result)
 
 
 def _resolve_dataset_path(dataset: Path, repo_root: Path) -> Path:
@@ -212,6 +529,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the exact retrieval_context passed to DeepEval before scoring.",
     )
     parser.add_argument(
+        "--langsmith",
+        action="store_true",
+        help="Trace each Kotaemon request to the configured LangSmith project.",
+    )
+    parser.add_argument(
         "--user-id",
         help=(
             "Use this app user's saved Gradio settings (required if multiple "
@@ -264,7 +586,13 @@ def main(argv: list[str] | None = None) -> int:
         _initial_result(dataset, record, result_path)
         for record, result_path in zip(records, result_paths, strict=True)
     ]
+    if args.langsmith:
+        for result in results:
+            result.update(application_trace_id=None, application_trace_url=None)
     api_key = ""
+    langsmith_api_key = ""
+    langsmith_project = ""
+    langsmith_client = None
     capture_target: dict[str, Any] = {}
 
     def capture_final_context(
@@ -290,6 +618,25 @@ def main(argv: list[str] | None = None) -> int:
         from decouple import config
 
         api_key = config("OPENAI_API_KEY", default="").strip()
+        if args.langsmith:
+            from langsmith import Client
+
+            langsmith_api_key = config("LANGSMITH_API_KEY", default="").strip()
+            if not langsmith_api_key:
+                raise ValueError(
+                    "Set LANGSMITH_API_KEY in the environment or repo .env "
+                    "to use --langsmith."
+                )
+            langsmith_endpoint = config("LANGSMITH_ENDPOINT", default="").strip()
+            langsmith_project = config(
+                "LANGSMITH_PROJECT", default="kotaemon-pipeline-eval"
+            ).strip()
+            if not langsmith_project:
+                raise ValueError("LANGSMITH_PROJECT must not be empty.")
+            langsmith_client = Client(
+                api_url=langsmith_endpoint or None,
+                api_key=langsmith_api_key,
+            )
         from theflow.settings import settings
 
         saved_tables, saved_settings, saved_index = _read_saved_app_config(
@@ -302,12 +649,23 @@ def main(argv: list[str] | None = None) -> int:
             _set_isolated_runtime_paths(settings, runtime_data)
             db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
             _seed_isolated_database(db_path, saved_tables, saved_settings)
+            pipeline_callback = None
+            if langsmith_client is not None:
+
+                def instrument_pipeline(pipeline: Any) -> None:
+                    capture_target["model_names"] = _instrument_pipeline(
+                        pipeline, langsmith_client
+                    )
+
+                pipeline_callback = instrument_pipeline
+
             answer_question = _prepare_question_runner(
                 docs_dir,
                 saved_settings,
                 saved_index,
                 evidence_callback=capture_final_context,
                 stop_after_evidence=False,
+                pipeline_callback=pipeline_callback,
             )
 
             for record, result, result_path in zip(
@@ -318,7 +676,28 @@ def main(argv: list[str] | None = None) -> int:
 
                 stage = "kotaemon_run"
                 try:
-                    generated_answer, citations = answer_question(record["question"])
+                    if langsmith_client is None:
+                        generated_answer, citations = answer_question(
+                            record["question"]
+                        )
+                    else:
+                        with (
+                            _instrument_generation_clients(langsmith_client),
+                            _propagate_trace_context_to_threads(),
+                        ):
+                            generated_answer, citations = _run_traced_question(
+                                record["question"],
+                                question_id,
+                                dataset,
+                                answer_question,
+                                capture_target,
+                                langsmith_client,
+                                langsmith_project,
+                                result,
+                                result_path,
+                            )
+                        print(f"LangSmith trace: {result['application_trace_id']}")
+                        print(f"LangSmith URL: {result['application_trace_url']}")
                     _ = citations
                     if "final_context" not in capture_target:
                         raise RuntimeError(
@@ -395,7 +774,9 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as exc:
                     result["status"] = "failed"
                     result["failed_stage"] = stage
-                    result["sanitized_error"] = _sanitize_error(exc, api_key)
+                    result["sanitized_error"] = _sanitize_error(
+                        exc, api_key, langsmith_api_key
+                    )
                     _write_result(result_path, result)
                     print(
                         f"[{question_id}] Error ({stage}): "
@@ -411,8 +792,18 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             result["status"] = "failed"
             result["failed_stage"] = "kotaemon_setup"
-            result["sanitized_error"] = _sanitize_error(exc, api_key)
+            result["sanitized_error"] = _sanitize_error(exc, api_key, langsmith_api_key)
             _write_result(result_path, result)
+
+    if langsmith_client is not None:
+        try:
+            tracing_queue = langsmith_client.tracing_queue
+            if tracing_queue is not None:
+                tracing_queue.join()
+            langsmith_client.cleanup()
+        except Exception as exc:
+            print(f"Error flushing LangSmith traces: {exc}", file=sys.stderr)
+            return 1
 
     if output_dir is not None and batch_mode:
         summary_path = output_dir / "summary.json"

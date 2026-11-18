@@ -3584,6 +3584,7 @@ dependencies = [
     { name = "deepeval" },
     { name = "kotaemon", extra = ["all"] },
     { name = "ktem" },
+    { name = "langsmith" },
 ]
 
 [package.dev-dependencies]
@@ -3605,6 +3606,7 @@ requires-dist = [
     { name = "deepeval", specifier = ">=2.5.0,<2.6" },
     { name = "kotaemon", extras = ["all"], editable = "libs/kotaemon" },
     { name = "ktem", editable = "libs/ktem" },
+    { name = "langsmith", specifier = "==0.1.147" },
 ]
 
 [package.metadata.requires-dev]
