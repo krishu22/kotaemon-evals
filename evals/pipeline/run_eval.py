@@ -114,7 +114,7 @@ def _upload_metric_feedback(
         feedback = client.create_feedback(
             run_id=result["application_trace_id"],
             key=metric_name,
-            score=score,
+            score=round(float(score),4),
             comment=reason,
         )
     except Exception as exc:
