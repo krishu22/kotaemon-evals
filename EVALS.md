@@ -31,6 +31,43 @@ reports when Kotaemon also supplied images to the generator. `--output-dir`
 writes one result JSON per question and, for batch runs, a `summary.json` with
 question statuses and per-metric means. Omit it for console-only output.
 
+## Evaluating saved application answers
+
+The application evaluator judges correctness and completeness from a saved
+pipeline result without rerunning Kotaemon. The question ID is matched against
+the four golden datasets under `data/golden/`, and the saved query must match
+the selected golden question. Evaluate one saved result with:
+
+```bash
+python -m evals.application.run_eval \
+  --question-id RLPM-39 \
+  --result results/pipeline/langsmith_smoke/RLPM-39_result.json \
+  --output-dir results/application/rlpm_smoke
+```
+
+Batch mode discovers pipeline results by their JSON contents, skips summaries,
+and writes one application result per question plus a `summary.json`. Pass
+`--question-ids ID [ID ...]` to select questions; omit it to evaluate every
+pipeline result in the directory:
+
+```bash
+python -m evals.application.run_eval \
+  --results-dir results/pipeline/rlpm_batch_smoke \
+  --question-ids RLPM-39 RLPM-24 RLPM-07 \
+  --output-dir results/application/rlpm_batch_smoke
+```
+
+```bash
+python -m evals.application.run_eval \
+  --results-dir results/pipeline/rlpm_batch_smoke \
+  --output-dir results/application/rlpm_all_saved
+```
+
+The batch summary reports per-question status, result paths and scores, failed
+counts, and correctness and completeness means with the number of questions
+contributing to each. Failed questions do not stop the rest of the batch; the
+process exits nonzero if any question fails.
+
 ## Inspecting retrieved evidence
 
 From the repository root with the project virtual environment active, inspect
