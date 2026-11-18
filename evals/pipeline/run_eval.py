@@ -87,6 +87,59 @@ def _sanitize_error(exc: Exception, *api_keys: str) -> str:
     return f"{type(exc).__name__}: {message}"
 
 
+def _update_feedback_status(result: dict[str, Any]) -> None:
+    feedback = result["langsmith_feedback"]
+    statuses = [item["status"] for item in feedback["metrics"].values()]
+    if "failed" in statuses:
+        feedback["status"] = "partial_failure"
+    elif all(status == "uploaded" for status in statuses):
+        feedback["status"] = "uploaded"
+    elif any(status == "uploaded" for status in statuses):
+        feedback["status"] = "incomplete"
+    else:
+        feedback["status"] = "pending"
+
+
+def _upload_metric_feedback(
+    client: Any,
+    result: dict[str, Any],
+    result_path: Path | None,
+    metric_name: str,
+    score: Any,
+    reason: str | None,
+    *api_keys: str,
+) -> None:
+    feedback_metric = result["langsmith_feedback"]["metrics"][metric_name]
+    try:
+        feedback = client.create_feedback(
+            run_id=result["application_trace_id"],
+            key=metric_name,
+            score=score,
+            comment=reason,
+        )
+    except Exception as exc:
+        feedback_metric.update(
+            status="failed",
+            sanitized_error=_sanitize_error(exc, *api_keys),
+        )
+        _update_feedback_status(result)
+        _write_result(result_path, result)
+        print(
+            f"[{result['question_id']}] Warning: LangSmith feedback upload "
+            f"failed for {metric_name}: {feedback_metric['sanitized_error']}",
+            file=sys.stderr,
+        )
+        return
+
+    feedback_metric.update(
+        status="uploaded",
+        feedback_id=str(feedback.id),
+        sanitized_error=None,
+    )
+    _update_feedback_status(result)
+    _write_result(result_path, result)
+
+
 def _trace_model_name(model: Any) -> str | None:
     if model is None:
         return None
@@ -589,6 +642,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.langsmith:
         for result in results:
             result.update(application_trace_id=None, application_trace_url=None)
+            result["langsmith_feedback"] = {
+                "status": "pending",
+                "metrics": {
+                    name: {
+                        "status": "pending",
+                        "feedback_id": None,
+                        "sanitized_error": None,
+                    }
+                    for name in (
+                        "contextual_relevancy",
+                        "faithfulness",
+                        "answer_relevancy",
+                    )
+                },
+            }
     api_key = ""
     langsmith_api_key = ""
     langsmith_project = ""
@@ -765,6 +833,17 @@ def main(argv: list[str] | None = None) -> int:
                             "reason": metric.reason,
                         }
                         _write_result(result_path, result)
+                        if langsmith_client is not None:
+                            _upload_metric_feedback(
+                                langsmith_client,
+                                result,
+                                result_path,
+                                name,
+                                score,
+                                metric.reason,
+                                api_key,
+                                langsmith_api_key,
+                            )
                         print(f"{metric.__class__.__name__}: {metric.score}")
                         print(f"Reason: {metric.reason}")
 
