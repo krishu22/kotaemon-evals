@@ -15,6 +15,11 @@ from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
 from evals.retriever.extract_claims import _create_openai_client
+from evals.operations import (
+    OperationsRecorder,
+    build_batch_operations_summary,
+    instrument_openai_calls,
+)
 from scripts.run_rag_eval import _load_dataset_records
 
 
@@ -80,9 +85,7 @@ def _read_json(path: Path, label: str) -> Any:
         raise ValueError(f"{label} is not valid JSON ({path}): {exc}") from exc
 
 
-def _load_claims(
-    record: dict[str, Any], dataset_path: Path
-) -> list[dict[str, str]]:
+def _load_claims(record: dict[str, Any], dataset_path: Path) -> list[dict[str, str]]:
     question_id = record.get("id")
     if "retrieval_claims" not in record:
         raise ValueError(
@@ -91,9 +94,7 @@ def _load_claims(
         )
     claims = record["retrieval_claims"]
     if not isinstance(claims, list):
-        raise ValueError(
-            f"{question_id} retrieval_claims must be a JSON array"
-        )
+        raise ValueError(f"{question_id} retrieval_claims must be a JSON array")
 
     validated: list[dict[str, str]] = []
     seen_ids: set[str] = set()
@@ -106,17 +107,13 @@ def _load_claims(
         claim_text = item.get("claim")
         if not isinstance(claim_id, str) or not claim_id.strip():
             raise ValueError(
-                f"Retrieval claim {index} for {question_id} needs a "
-                "non-empty ID"
+                f"Retrieval claim {index} for {question_id} needs a " "non-empty ID"
             )
         if claim_id in seen_ids:
-            raise ValueError(
-                f"Duplicate claim ID {claim_id} for {question_id}"
-            )
+            raise ValueError(f"Duplicate claim ID {claim_id} for {question_id}")
         if not isinstance(claim_text, str) or not claim_text.strip():
             raise ValueError(
-                f"Retrieval claim {claim_id} for {question_id} needs "
-                "non-empty text"
+                f"Retrieval claim {claim_id} for {question_id} needs " "non-empty text"
             )
         seen_ids.add(claim_id)
         validated.append({"id": claim_id, "claim": claim_text.strip()})
@@ -176,18 +173,12 @@ def _select_evidence(
     ranked_chunks = dump.get("ranked_chunks")
     final_context_data = dump.get("final_context")
     if not isinstance(ranked_chunks, list):
-        raise ValueError(
-            f"{question_id} evidence dump has no ranked_chunks array"
-        )
+        raise ValueError(f"{question_id} evidence dump has no ranked_chunks array")
     if not isinstance(final_context_data, dict):
-        raise ValueError(
-            f"{question_id} evidence dump has no final_context object"
-        )
+        raise ValueError(f"{question_id} evidence dump has no final_context object")
     final_context = final_context_data.get("text")
     if not isinstance(final_context, str):
-        raise ValueError(
-            f"{question_id} evidence dump final_context.text is invalid"
-        )
+        raise ValueError(f"{question_id} evidence dump final_context.text is invalid")
 
     ordered_chunks = []
     for position, chunk in enumerate(ranked_chunks):
@@ -229,22 +220,12 @@ def _validate_judge_output(
     expected_ids = [claim["id"] for claim in claims]
     received_ids = [verdict.claim_id for verdict in parsed.verdicts]
     if len(received_ids) != len(set(received_ids)):
-        raise ValueError(
-            f"{question_id} judge returned duplicate claim verdicts"
-        )
-    if set(received_ids) != set(expected_ids) or len(received_ids) != len(
-        expected_ids
-    ):
+        raise ValueError(f"{question_id} judge returned duplicate claim verdicts")
+    if set(received_ids) != set(expected_ids) or len(received_ids) != len(expected_ids):
         missing = [
-            claim_id
-            for claim_id in expected_ids
-            if claim_id not in received_ids
+            claim_id for claim_id in expected_ids if claim_id not in received_ids
         ]
-        extra = [
-            claim_id
-            for claim_id in received_ids
-            if claim_id not in expected_ids
-        ]
+        extra = [claim_id for claim_id in received_ids if claim_id not in expected_ids]
         raise ValueError(
             f"{question_id} judge verdict IDs do not match input claims "
             f"(missing={missing}, extra={extra})"
@@ -288,8 +269,7 @@ def _judge_question(
     request_data = {
         "question": question,
         "verdicts": [
-            {"claim_id": claim["id"], "claim": claim["claim"]}
-            for claim in claims
+            {"claim_id": claim["id"], "claim": claim["claim"]} for claim in claims
         ],
         "evidence": evidence,
     }
@@ -311,12 +291,8 @@ def _judge_question(
     if message.refusal:
         raise ValueError(f"{question_id} judge refused the evaluation")
     if message.parsed is None:
-        raise ValueError(
-            f"{question_id} judge returned no structured verdicts"
-        )
-    return _validate_judge_output(
-        message.parsed, claims, evidence, question_id
-    )
+        raise ValueError(f"{question_id} judge returned no structured verdicts")
+    return _validate_judge_output(message.parsed, claims, evidence, question_id)
 
 
 def _score(
@@ -328,12 +304,8 @@ def _score(
     if not claims:
         return None
 
-    supported_count = sum(
-        verdict["verdict"] == "supported" for verdict in verdicts
-    )
-    partial_count = sum(
-        verdict["verdict"] == "partial" for verdict in verdicts
-    )
+    supported_count = sum(verdict["verdict"] == "supported" for verdict in verdicts)
+    partial_count = sum(verdict["verdict"] == "partial" for verdict in verdicts)
     useful_ranks = sorted(
         {
             rank
@@ -342,9 +314,7 @@ def _score(
             for rank in verdict["ranks"]
         }
     )
-    precision_denominator = (
-        k if k is not None else evaluated_chunk_count
-    )
+    precision_denominator = k if k is not None else evaluated_chunk_count
     metrics = {
         "claim_recall_at_k": supported_count / len(claims),
         "fully_supported_claim_count": supported_count,
@@ -367,9 +337,7 @@ def _original_retrieval_limit(dump: dict[str, Any]) -> Any:
     limits = dump.get("retrieval_limits", {}).get("retrievers")
     if isinstance(limits, list):
         requested = [
-            entry.get("requested_k")
-            for entry in limits
-            if isinstance(entry, dict)
+            entry.get("requested_k") for entry in limits if isinstance(entry, dict)
         ]
         if len(requested) == 1:
             return requested[0]
@@ -404,9 +372,7 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=(
-            "Judge stored retrieval claims against saved evidence dumps."
-        )
+        description=("Judge stored retrieval claims against saved evidence dumps.")
     )
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument(
@@ -439,13 +405,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     dataset_path = (
-        args.dataset
-        if args.dataset.is_absolute()
-        else Path.cwd() / args.dataset
+        args.dataset if args.dataset.is_absolute() else Path.cwd() / args.dataset
     )
-    report_path = (
-        args.report if args.report.is_absolute() else Path.cwd() / args.report
-    )
+    report_path = args.report if args.report.is_absolute() else Path.cwd() / args.report
     if args.k is not None and args.k < 1:
         parser.error("--k must be a positive integer")
     if len(args.question_ids) != len(set(args.question_ids)):
@@ -473,8 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if missing_ids:
             raise ValueError(
-                f"Question ID(s) not found in {dataset_path}: "
-                + ", ".join(missing_ids)
+                f"Question ID(s) not found in {dataset_path}: " + ", ".join(missing_ids)
             )
 
         claims_by_id = {}
@@ -486,8 +447,7 @@ def main(argv: list[str] | None = None) -> int:
             claims_by_id[question_id] = claims
 
         evidence_paths = [
-            path if path.is_absolute() else Path.cwd() / path
-            for path in args.evidence
+            path if path.is_absolute() else Path.cwd() / path for path in args.evidence
         ]
         dumps_by_id: dict[str, dict[str, Any]] = {}
         for path in evidence_paths:
@@ -499,9 +459,7 @@ def main(argv: list[str] | None = None) -> int:
                     "which is not selected"
                 )
             if question_id in dumps_by_id:
-                raise ValueError(
-                    f"Multiple evidence dumps supplied for {question_id}"
-                )
+                raise ValueError(f"Multiple evidence dumps supplied for {question_id}")
             record = records_by_id[question_id]
             if dump.get("question") != record["question"]:
                 raise ValueError(
@@ -549,20 +507,28 @@ def main(argv: list[str] | None = None) -> int:
             dump = dumps_by_id[question_id]
             claims = claims_by_id[question_id]
             selected = selected_by_id[question_id]
+            operations = OperationsRecorder()
+            operations.start_evaluation()
             if claims and selected:
                 if client is None:
                     raise RuntimeError(
-                        "OpenAI client was not initialized for "
-                        "non-empty claims"
+                        "OpenAI client was not initialized for " "non-empty claims"
                     )
-                verdicts = _judge_question(
-                    client,
-                    args.model,
-                    record["question"],
-                    claims,
-                    selected,
-                    question_id,
-                )
+                try:
+                    with (
+                        instrument_openai_calls(),
+                        operations.activate("evaluation"),
+                    ):
+                        verdicts = _judge_question(
+                            client,
+                            args.model,
+                            record["question"],
+                            claims,
+                            selected,
+                            question_id,
+                        )
+                finally:
+                    operations.finish_evaluation()
                 judge_called = True
             elif claims:
                 verdicts = [
@@ -574,23 +540,21 @@ def main(argv: list[str] | None = None) -> int:
                     for claim in claims
                 ]
                 judge_called = False
+                operations.finish_evaluation()
             else:
                 verdicts = []
                 judge_called = False
-            metrics = _score(
-                claims, verdicts, args.k, len(selected)
-            )
+                operations.finish_evaluation()
+            metrics = _score(claims, verdicts, args.k, len(selected))
 
-            verdict_by_id = {
-                verdict["claim_id"]: verdict for verdict in verdicts
-            }
+            verdict_by_id = {verdict["claim_id"]: verdict for verdict in verdicts}
+            operation_data = operations.snapshot()
+            operation_data["originating_run"] = dump.get("operations")
             results.append(
                 {
                     "question_id": question_id,
                     "question": record["question"],
-                    "original_retrieval_limit": _original_retrieval_limit(
-                        dump
-                    ),
+                    "original_retrieval_limit": _original_retrieval_limit(dump),
                     "evaluation_mode": evaluation_mode,
                     "evaluation_k": args.k,
                     "available_chunk_count": available_by_id[question_id],
@@ -610,16 +574,12 @@ def main(argv: list[str] | None = None) -> int:
                                 else None
                             ),
                             "ranks": (
-                                verdict_by_id[claim["id"]]["ranks"]
-                                if claims
-                                else []
+                                verdict_by_id[claim["id"]]["ranks"] if claims else []
                             ),
                         }
                         for claim in claims
                     ],
-                    "useful_ranks": (
-                        metrics["useful_ranks"] if metrics else []
-                    ),
+                    "useful_ranks": (metrics["useful_ranks"] if metrics else []),
                     "claim_recall_at_k": (
                         metrics["claim_recall_at_k"] if metrics else None
                     ),
@@ -629,6 +589,8 @@ def main(argv: list[str] | None = None) -> int:
                     "chunk_precision_at_k": (
                         metrics["chunk_precision_at_k"] if metrics else None
                     ),
+                    "status": "complete",
+                    "operations": operation_data,
                 }
             )
 
@@ -638,6 +600,7 @@ def main(argv: list[str] | None = None) -> int:
             "evaluation_k": args.k,
             "dataset": str(dataset_path),
             "results": results,
+            "operations": build_batch_operations_summary(results),
         }
         _write_report(report_path, report)
         evaluation_summary = (
@@ -651,8 +614,7 @@ def main(argv: list[str] | None = None) -> int:
                 recall_summary = "claim recall: null (no claims)"
             else:
                 supported = sum(
-                    claim["verdict"] == "supported"
-                    for claim in result["verdicts"]
+                    claim["verdict"] == "supported" for claim in result["verdicts"]
                 )
                 recall_summary = (
                     f"supported: {supported}/{len(result['verdicts'])}; "

@@ -26,6 +26,11 @@ from evals.retriever.judge_evidence import (
     _score,
     _select_evidence,
 )
+from evals.operations import (
+    OperationsRecorder,
+    build_batch_operations_summary,
+    instrument_openai_calls,
+)
 from scripts.run_rag_eval import (
     _load_dataset_records,
     _validate_question_record,
@@ -154,6 +159,7 @@ def _initial_result(
         "claim_recall_at_k": None,
         "chunk_precision_at_k": None,
         "artifact_path": None,
+        "operations": OperationsRecorder().snapshot(),
     }
 
 
@@ -292,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
             "result": result,
             "artifact_path": artifact_paths[question_id],
             "evidence_dump": None,
+            "operations": OperationsRecorder(),
         }
         work.append(item)
         work_by_id[question_id] = item
@@ -301,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
         record = records_by_id[question_id]
         result = results_by_id[question_id]
         result["question"] = record["question"]
+        operations = work_by_id[question_id]["operations"]
+        operations.start_evaluation()
         try:
             question = record["question"]
             if "retrieval_claims" in record:
@@ -310,22 +319,30 @@ def main(argv: list[str] | None = None) -> int:
                 result["claims_source"] = "generated_draft"
                 if client is None:
                     client = _create_openai_client()
-                claim_texts = _request_claims(client, args.model, record)
+                with instrument_openai_calls(), operations.activate("evaluation"):
+                    claim_texts = _request_claims(client, args.model, record)
                 generated = _preview_record(question_id, question, claim_texts)
                 claims = generated["retrieval_claims"]
             result["claims"] = claims
+            result["status"] = "pending_retrieval"
+            operations.finish_evaluation()
+            result["operations"] = operations.snapshot()
             _save_artifact(
                 result,
                 work_by_id[question_id]["evidence_dump"],
                 artifact_paths[question_id],
             )
         except Exception as exc:
+            operations.finish_evaluation()
+            result["operations"] = operations.snapshot()
             if result["claims_source"] == "generated_draft":
                 stage = "generate_claims"
             elif result["claims_source"] is None:
                 stage = "load_question"
             else:
                 stage = "load_claims"
+            result["status"] = "failed"
+            result["failed_stage"] = stage
             _save_artifact(
                 result,
                 work_by_id[question_id]["evidence_dump"],
@@ -338,15 +355,24 @@ def main(argv: list[str] | None = None) -> int:
     if runnable:
         docs_dir = repo_root / "data" / "raw"
         try:
-            with evidence_capture_session(docs_dir, args.user_id) as capture_question:
+            setup_operations = OperationsRecorder()
+            with evidence_capture_session(
+                docs_dir, args.user_id, operations=setup_operations
+            ) as capture_question:
                 for item in runnable:
                     question_id = item["question_id"]
                     result = item["result"]
+                    operations = item["operations"]
                     record = records_by_id[question_id]
                     stage = "retrieve_evidence"
                     try:
-                        dump = capture_question(question_id, record["question"])
+                        dump = capture_question(
+                            question_id, record["question"], operations
+                        )
                         item["evidence_dump"] = dump
+                        operations.model_metadata.update(
+                            setup_operations.model_metadata
+                        )
                         stage = "select_evidence"
                         result["configured_retrieval_limit"] = (
                             _original_retrieval_limit(dump)
@@ -367,10 +393,12 @@ def main(argv: list[str] | None = None) -> int:
 
                         if "failure" in result:
                             item["status"] = "failed"
+                            result["status"] = "failed"
                             item["failure"] = result["failure"]
                             continue
 
                         stage = "judge"
+                        operations.start_evaluation()
                         if result["claims"] and selected_with_metadata:
                             if client is None:
                                 client = _create_openai_client()
@@ -378,14 +406,18 @@ def main(argv: list[str] | None = None) -> int:
                                 {"rank": chunk["rank"], "text": chunk["text"]}
                                 for chunk in selected_with_metadata
                             ]
-                            verdicts = _judge_question(
-                                client,
-                                args.model,
-                                record["question"],
-                                result["claims"],
-                                judge_evidence,
-                                question_id,
-                            )
+                            with (
+                                instrument_openai_calls(),
+                                operations.activate("evaluation"),
+                            ):
+                                verdicts = _judge_question(
+                                    client,
+                                    args.model,
+                                    record["question"],
+                                    result["claims"],
+                                    judge_evidence,
+                                    question_id,
+                                )
                         elif result["claims"]:
                             verdicts = [
                                 {
@@ -426,9 +458,21 @@ def main(argv: list[str] | None = None) -> int:
                             result["chunk_precision_at_k"] = metrics[
                                 "chunk_precision_at_k"
                             ]
+                        result["status"] = "complete"
+                        operations.finish_evaluation()
+                        result["operations"] = operations.snapshot()
+                        result["operations"]["setup"] = setup_operations.snapshot()
+                        operations.measure_serialization(result)
                         _save_artifact(result, dump, item["artifact_path"])
                         item["status"] = "complete"
                     except Exception as exc:
+                        result["status"] = "failed"
+                        result["failed_stage"] = stage
+                        operations.finish_evaluation()
+                        operations.finish_request(False, stage)
+                        result["operations"] = operations.snapshot()
+                        result["operations"]["setup"] = setup_operations.snapshot()
+                        operations.measure_serialization(result)
                         _save_artifact(
                             result,
                             item["evidence_dump"],
@@ -495,6 +539,9 @@ def main(argv: list[str] | None = None) -> int:
                 "macro_average_chunk_precision_at_k": macro_precision,
                 "chunk_precision_question_count": precision_question_count,
                 "results": summary_rows,
+                "operations": build_batch_operations_summary(
+                    [item["result"] for item in work]
+                ),
             },
         )
     except OSError as exc:

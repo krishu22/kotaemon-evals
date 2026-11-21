@@ -12,6 +12,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterator
 
@@ -22,6 +23,11 @@ from scripts.run_rag_eval import (
     _seed_isolated_database,
     _set_isolated_runtime_paths,
     _validate_question_record,
+)
+from evals.operations import (
+    OperationsRecorder,
+    build_batch_operations_summary,
+    instrument_openai_calls,
 )
 
 
@@ -114,7 +120,7 @@ def _upload_metric_feedback(
         feedback = client.create_feedback(
             run_id=result["application_trace_id"],
             key=metric_name,
-            score=round(float(score),4),
+            score=round(float(score), 4),
             comment=reason,
         )
     except Exception as exc:
@@ -153,6 +159,75 @@ def _trace_model_name(model: Any) -> str | None:
             if kwargs.get(attribute):
                 return str(kwargs[attribute])
     return type(model).__name__
+
+
+def _langsmith_leaf_usage(client: Any, trace_id: str) -> dict[str, Any]:
+    root = client.read_run(trace_id, load_child_runs=True)
+    calls: list[Any] = []
+
+    def visit(run: Any) -> None:
+        children = list(getattr(run, "child_runs", None) or [])
+        llm_children = [
+            child
+            for child in children
+            if str(getattr(child, "run_type", "")).casefold() == "llm"
+        ]
+        if str(getattr(run, "run_type", "")).casefold() == "llm" and not llm_children:
+            calls.append(run)
+        for child in children:
+            visit(child)
+
+    visit(root)
+    tokens = {
+        "input": sum(
+            run.prompt_tokens
+            for run in calls
+            if isinstance(getattr(run, "prompt_tokens", None), int)
+        ),
+        "output": sum(
+            run.completion_tokens
+            for run in calls
+            if isinstance(getattr(run, "completion_tokens", None), int)
+        ),
+        "total": sum(
+            run.total_tokens
+            for run in calls
+            if isinstance(getattr(run, "total_tokens", None), int)
+        ),
+    }
+    costs = [
+        run.total_cost
+        for run in calls
+        if isinstance(getattr(run, "total_cost", None), (int, float))
+    ]
+    return {
+        "source": "LangSmith leaf LLM runs",
+        "aggregation": "leaf-only; parent spans excluded",
+        "model_calls": len(calls),
+        "tokens": tokens,
+        "cost": sum(costs) if costs else None,
+        "currency": "USD",
+        "call_details": [
+            {
+                "run_id": str(run.id),
+                "name": run.name,
+                "model": (
+                    ((getattr(run, "extra", {}) or {}).get("metadata") or {}).get(
+                        "model_name"
+                    )
+                    or run.name
+                ),
+                "input_tokens": run.prompt_tokens,
+                "output_tokens": run.completion_tokens,
+                "total_tokens": run.total_tokens,
+                "cost": run.total_cost,
+                "parent_run_id": (
+                    str(run.parent_run_id) if run.parent_run_id else None
+                ),
+            }
+            for run in calls
+        ],
+    }
 
 
 def _trace_component_method(
@@ -520,6 +595,7 @@ def _initial_result(
             )
         },
         "result_path": str(result_path) if result_path is not None else None,
+        "operations": OperationsRecorder().snapshot(),
     }
 
 
@@ -551,6 +627,7 @@ def _build_summary(
         "completed_count": sum(row["status"] == "complete" for row in rows),
         "failed_count": sum(row["status"] != "complete" for row in rows),
         "metrics": means,
+        "operations": build_batch_operations_summary(rows),
         "results": [
             {
                 "question_id": row["question_id"],
@@ -662,6 +739,13 @@ def main(argv: list[str] | None = None) -> int:
     langsmith_project = ""
     langsmith_client = None
     capture_target: dict[str, Any] = {}
+    setup_operations = OperationsRecorder()
+    operations_by_id: dict[str, OperationsRecorder] = {}
+
+    def operations_snapshot(operations: OperationsRecorder) -> dict[str, Any]:
+        snapshot = operations.snapshot()
+        snapshot["setup"] = setup_operations.snapshot()
+        return snapshot
 
     def capture_final_context(
         docs: list[Any],
@@ -727,29 +811,41 @@ def main(argv: list[str] | None = None) -> int:
 
                 pipeline_callback = instrument_pipeline
 
-            answer_question = _prepare_question_runner(
-                docs_dir,
-                saved_settings,
-                saved_index,
-                evidence_callback=capture_final_context,
-                stop_after_evidence=False,
-                pipeline_callback=pipeline_callback,
-            )
+            with instrument_openai_calls(), setup_operations.activate("indexing"):
+                answer_question = _prepare_question_runner(
+                    docs_dir,
+                    saved_settings,
+                    saved_index,
+                    evidence_callback=capture_final_context,
+                    stop_after_evidence=False,
+                    pipeline_callback=pipeline_callback,
+                    operations=setup_operations,
+                )
 
             for record, result, result_path in zip(
                 records, results, result_paths, strict=True
             ):
                 question_id = record["id"]
+                operations = OperationsRecorder()
+                operations_by_id[question_id] = operations
+                operations.model_metadata.update(setup_operations.model_metadata)
+                result["operations"] = operations_snapshot(operations)
                 capture_target.clear()
 
                 stage = "kotaemon_run"
                 try:
                     if langsmith_client is None:
-                        generated_answer, citations = answer_question(
-                            record["question"]
-                        )
+                        with (
+                            instrument_openai_calls(),
+                            operations.activate("application"),
+                        ):
+                            generated_answer, citations = answer_question(
+                                record["question"]
+                            )
                     else:
                         with (
+                            instrument_openai_calls(),
+                            operations.activate("application"),
                             _instrument_generation_clients(langsmith_client),
                             _propagate_trace_context_to_threads(),
                         ):
@@ -767,6 +863,11 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"LangSmith trace: {result['application_trace_id']}")
                         print(f"LangSmith URL: {result['application_trace_url']}")
                     _ = citations
+                    operations.finish_request(True)
+                    if result.get("application_trace_id"):
+                        operations.model_metadata["langsmith_trace_id"] = result[
+                            "application_trace_id"
+                        ]
                     if "final_context" not in capture_target:
                         raise RuntimeError(
                             "Kotaemon completed without capturing its final "
@@ -786,6 +887,7 @@ def main(argv: list[str] | None = None) -> int:
                         context_block_count=len(final_context_texts),
                         image_count=image_count,
                         status="pending_scoring",
+                        operations=operations_snapshot(operations),
                     )
                     _write_result(result_path, result)
                     if args.show_context:
@@ -815,47 +917,64 @@ def main(argv: list[str] | None = None) -> int:
                     )
 
                     stage = "judge_setup"
-                    judge_model = _create_judge_model()
-                    test_case, metrics = _evaluate(
-                        record["question"],
-                        generated_answer,
-                        final_context_texts,
-                        judge_model,
-                    )
-                    for name, metric in metrics:
-                        stage = f"scoring:{name}"
-                        metric.measure(test_case)
-                        score = metric.score
-                        if hasattr(score, "item"):
-                            score = score.item()
-                        result["metrics"][name] = {
-                            "score": score,
-                            "reason": metric.reason,
-                        }
-                        _write_result(result_path, result)
-                        if langsmith_client is not None:
-                            _upload_metric_feedback(
-                                langsmith_client,
-                                result,
-                                result_path,
-                                name,
-                                score,
-                                metric.reason,
-                                api_key,
-                                langsmith_api_key,
+                    operations.start_evaluation()
+                    try:
+                        with (
+                            instrument_openai_calls(),
+                            operations.activate("evaluation"),
+                        ):
+                            judge_model = _create_judge_model()
+                            test_case, metrics = _evaluate(
+                                record["question"],
+                                generated_answer,
+                                final_context_texts,
+                                judge_model,
                             )
-                        print(f"{metric.__class__.__name__}: {metric.score}")
-                        print(f"Reason: {metric.reason}")
+                            for name, metric in metrics:
+                                stage = f"scoring:{name}"
+                                metric.measure(test_case)
+                                score = metric.score
+                                if hasattr(score, "item"):
+                                    score = score.item()
+                                result["metrics"][name] = {
+                                    "score": score,
+                                    "reason": metric.reason,
+                                }
+                                result["operations"] = operations_snapshot(operations)
+                                _write_result(result_path, result)
+                                if langsmith_client is not None:
+                                    _upload_metric_feedback(
+                                        langsmith_client,
+                                        result,
+                                        result_path,
+                                        name,
+                                        score,
+                                        metric.reason,
+                                        api_key,
+                                        langsmith_api_key,
+                                    )
+                                print(f"{metric.__class__.__name__}: {metric.score}")
+                                print(f"Reason: {metric.reason}")
+                    finally:
+                        operations.finish_evaluation()
 
                     result["status"] = "complete"
+                    result["operations"] = operations_snapshot(operations)
+                    operations.measure_serialization(result)
+                    result["operations"]["setup"] = setup_operations.snapshot()
                     _write_result(result_path, result)
                     print()
                 except Exception as exc:
                     result["status"] = "failed"
                     result["failed_stage"] = stage
+                    operations.finish_request(False, stage)
+                    operations.finish_evaluation()
+                    result["operations"] = operations_snapshot(operations)
                     result["sanitized_error"] = _sanitize_error(
                         exc, api_key, langsmith_api_key
                     )
+                    operations.measure_serialization(result)
+                    result["operations"]["setup"] = setup_operations.snapshot()
                     _write_result(result_path, result)
                     print(
                         f"[{question_id}] Error ({stage}): "
@@ -872,13 +991,52 @@ def main(argv: list[str] | None = None) -> int:
             result["status"] = "failed"
             result["failed_stage"] = "kotaemon_setup"
             result["sanitized_error"] = _sanitize_error(exc, api_key, langsmith_api_key)
+            failure_operations = OperationsRecorder()
+            failure_operations.finish_request(False, "kotaemon_setup")
+            result["operations"] = failure_operations.snapshot()
+            result["operations"]["setup"] = setup_operations.snapshot()
+            result["operations"]["requests"] = {
+                "status": "failed",
+                "failed_stage": "kotaemon_setup",
+            }
+            failure_operations.measure_serialization(result)
+            result["operations"]["setup"] = setup_operations.snapshot()
             _write_result(result_path, result)
 
     if langsmith_client is not None:
         try:
+            trace_wait_started = time.monotonic()
             tracing_queue = langsmith_client.tracing_queue
             if tracing_queue is not None:
                 tracing_queue.join()
+            trace_wait_seconds = time.monotonic() - trace_wait_started
+            for record, result, result_path in zip(
+                records, results, result_paths, strict=True
+            ):
+                operations = operations_by_id.get(record["id"])
+                if operations is not None:
+                    operations.record_trace_wait(trace_wait_seconds)
+                    trace_id = result.get("application_trace_id")
+                    if trace_id:
+                        usage_started = time.monotonic()
+                        try:
+                            usage = _langsmith_leaf_usage(langsmith_client, trace_id)
+                            operations.record_trace_usage(
+                                usage, time.monotonic() - usage_started
+                            )
+                        except Exception as exc:
+                            operations.record_trace_usage(
+                                {
+                                    "source": "LangSmith leaf LLM runs",
+                                    "available": False,
+                                    "sanitized_error": _sanitize_error(
+                                        exc, langsmith_api_key
+                                    ),
+                                },
+                                time.monotonic() - usage_started,
+                            )
+                    result["operations"] = operations_snapshot(operations)
+                    _write_result(result_path, result)
             langsmith_client.cleanup()
         except Exception as exc:
             print(f"Error flushing LangSmith traces: {exc}", file=sys.stderr)
@@ -887,6 +1045,8 @@ def main(argv: list[str] | None = None) -> int:
     if output_dir is not None and batch_mode:
         summary_path = output_dir / "summary.json"
         summary = _build_summary(dataset, results)
+        if langsmith_client is not None:
+            summary["trace_upload_wait_ms"] = trace_wait_seconds
         try:
             _write_result(summary_path, summary)
         except OSError as exc:

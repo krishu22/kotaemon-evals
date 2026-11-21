@@ -23,6 +23,7 @@ from .format_context import (
     EVIDENCE_MODE_TEXT,
 )
 from .utils import find_text
+from .role import build_answer_system_prompt
 
 try:
     from ktem.llms.manager import llms
@@ -231,9 +232,9 @@ class AnswerWithContextPipeline(BaseComponent):
         output = ""
         logprobs = []
 
-        messages = []
-        if self.system_prompt:
-            messages.append(SystemMessage(content=self.system_prompt))
+        messages = [
+            SystemMessage(content=build_answer_system_prompt(self.system_prompt))
+        ]
 
         for human, ai in history[-self.n_last_interactions :]:
             messages.append(HumanMessage(content=human))

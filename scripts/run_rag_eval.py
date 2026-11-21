@@ -15,6 +15,16 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from evals.operations import (
+    OperationsRecorder,
+    build_batch_operations_summary,
+    instrument_openai_calls,
+    instrument_pipeline,
+)
+
 
 TABLES_TO_COPY = ("llm_table", "embedding", "reranking")
 BATCHES = {
@@ -75,15 +85,13 @@ def _validate_question_record(record: dict[str, Any], dataset: Path) -> tuple[st
 
 def _load_question(dataset: Path, question_id: str) -> dict[str, Any]:
     records = _load_dataset_records(dataset)
-    matches = [
-        record
-        for record in records
-        if record.get("id") == question_id
-    ]
+    matches = [record for record in records if record.get("id") == question_id]
     if not matches:
         raise ValueError(f"Question ID {question_id!r} was not found in {dataset}")
     if len(matches) > 1:
-        raise ValueError(f"Question ID {question_id!r} occurs more than once in {dataset}")
+        raise ValueError(
+            f"Question ID {question_id!r} occurs more than once in {dataset}"
+        )
 
     _validate_question_record(matches[0], dataset)
     return matches[0]
@@ -139,7 +147,9 @@ def _decode_json(value: Any) -> Any:
 
 def _read_saved_app_config(
     database_url: str, user_id: str | None, user_management: bool
-) -> tuple[dict[str, list[tuple[Any, ...]]], dict[str, Any] | None, tuple[Any, ...] | None]:
+) -> tuple[
+    dict[str, list[tuple[Any, ...]]], dict[str, Any] | None, tuple[Any, ...] | None
+]:
     from sqlalchemy.engine import make_url
 
     url = make_url(database_url)
@@ -176,9 +186,13 @@ def _read_saved_app_config(
                 "SELECT id, user, setting FROM settings ORDER BY rowid"
             ).fetchall()
             if user_id is not None:
-                saved_settings = next((row[2] for row in rows if row[1] == user_id), None)
+                saved_settings = next(
+                    (row[2] for row in rows if row[1] == user_id), None
+                )
                 if saved_settings is None:
-                    raise ValueError(f"No saved application settings for user {user_id!r}")
+                    raise ValueError(
+                        f"No saved application settings for user {user_id!r}"
+                    )
             elif not user_management:
                 saved_settings = next(
                     (row[2] for row in rows if row[1] == "default"), None
@@ -335,11 +349,10 @@ def _prepare_question_runner(
     docs_dir: Path,
     saved_settings: dict[str, Any] | None,
     saved_index: tuple[Any, ...] | None,
-    evidence_callback: Callable[
-        [list[Any], Any, list[Any], int], None
-    ] | None = None,
+    evidence_callback: Callable[[list[Any], Any, list[Any], int], None] | None = None,
     stop_after_evidence: bool = True,
     pipeline_callback: Callable[[Any], None] | None = None,
+    operations: OperationsRecorder | None = None,
 ) -> Callable[[str], tuple[str, str]]:
     from theflow.settings import settings
     from theflow.utils.modules import import_dotted_string
@@ -395,11 +408,24 @@ def _prepare_question_runner(
     indexing_pipeline = index.get_indexing_pipeline(effective_settings, "default")
     pdfs = sorted(docs_dir.glob("*.pdf"))
     stream = indexing_pipeline.stream(pdfs, reindex=False)
+    timer = operations.timed("setup_indexing") if operations is not None else None
+    if timer is not None:
+        timer.__enter__()
     try:
-        while True:
-            next(stream)
-    except StopIteration as stop:
-        file_ids, errors, _ = stop.value
+        scope = operations.activate("indexing") if operations is not None else None
+        if scope is not None:
+            scope.__enter__()
+        try:
+            while True:
+                next(stream)
+        except StopIteration as stop:
+            file_ids, errors, _ = stop.value
+        finally:
+            if scope is not None:
+                scope.__exit__(None, None, None)
+    finally:
+        if timer is not None:
+            timer.__exit__(None, None, None)
     if errors and any(errors):
         failures = [
             f"{pdfs[i].name}: {error}"
@@ -415,6 +441,38 @@ def _prepare_question_runner(
     reasoning_cls = reasoning_registry.get(reasoning_mode)
     if reasoning_cls is None:
         raise ValueError(f"Unknown configured reasoning mode: {reasoning_mode!r}")
+
+    if operations is not None:
+        llm_name = llms.get_default_name()
+        llm = llms.get(llm_name) if llm_name else None
+        reranker_names = (
+            [str(name) for name in index_config.get("reranking", [])]
+            if isinstance(index_config.get("reranking", []), list)
+            else []
+        )
+        operations.model_metadata.update(
+            reasoning_mode=str(reasoning_mode),
+            embedding_resource=str(embedding_name),
+            embedding_model=(
+                getattr(embedding_models_manager.get(embedding_name), "model", None)
+                or getattr(
+                    embedding_models_manager.get(embedding_name),
+                    "model_name",
+                    None,
+                )
+                or type(embedding_models_manager.get(embedding_name)).__name__
+            ),
+            generator_resource=str(llm_name) if llm_name else None,
+            generator_model=(
+                getattr(llm, "model", None)
+                or getattr(llm, "model_name", None)
+                or type(llm).__name__
+                if llm is not None
+                else None
+            ),
+            reranker_resources=reranker_names,
+            retrieval_mode=index_config.get("retrieval_mode"),
+        )
 
     def answer_question(question: str) -> tuple[str, str]:
         retrievers = index.get_retriever_pipelines_for_ids(
@@ -459,6 +517,8 @@ def _prepare_question_runner(
                 retrievers=retrievers,
                 stop_after_evidence=stop_after_evidence,
             )
+        if operations is not None:
+            instrument_pipeline(pipeline, operations)
         if pipeline_callback is not None:
             pipeline_callback(pipeline)
         answer = ""
@@ -470,7 +530,9 @@ def _prepare_question_runner(
                 )
             elif getattr(response, "channel", None) == "info":
                 citations = (
-                    "" if response.content is None else citations + str(response.content)
+                    ""
+                    if response.content is None
+                    else citations + str(response.content)
                 )
         return answer, citations
 
@@ -547,20 +609,26 @@ def main(argv: list[str] | None = None) -> int:
             _set_isolated_runtime_paths(settings, runtime_data)
             db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
             _seed_isolated_database(db_path, saved_tables, saved_settings)
-            answer_question = _prepare_question_runner(
-                docs_dir,
-                saved_settings,
-                saved_index,
-            )
+            setup_operations = OperationsRecorder()
+            with instrument_openai_calls(), setup_operations.activate("indexing"):
+                answer_question = _prepare_question_runner(
+                    docs_dir,
+                    saved_settings,
+                    saved_index,
+                    operations=setup_operations,
+                )
+            operation_results: list[dict[str, Any]] = []
             successes = 0
             failures = 0
             result_fields = list(
-                dict.fromkeys(
-                    key
-                    for record in questions
-                    for key in record
-                )
-            ) + ["generated_answer", "citations", "status", "error"]
+                dict.fromkeys(key for record in questions for key in record)
+            ) + [
+                "generated_answer",
+                "citations",
+                "status",
+                "error",
+                "operations_json",
+            ]
             with result_csv.open("w", encoding="utf-8", newline="") as output_file:
                 writer = csv.DictWriter(output_file, fieldnames=result_fields)
                 writer.writeheader()
@@ -568,8 +636,15 @@ def main(argv: list[str] | None = None) -> int:
                     question_id, question = _validate_question_record(
                         record, source_dataset
                     )
+                    operations = OperationsRecorder()
+                    operations.model_metadata.update(setup_operations.model_metadata)
                     try:
-                        answer, citations = answer_question(question)
+                        with (
+                            instrument_openai_calls(),
+                            operations.activate("application"),
+                        ):
+                            answer, citations = answer_question(question)
+                        operations.finish_request(True)
                         generated_answer = answer or "(Sorry, I don't know)"
                         citation_text = _plain_text(citations)
                         row = {
@@ -578,6 +653,13 @@ def main(argv: list[str] | None = None) -> int:
                             "citations": citation_text,
                             "status": "success",
                             "error": "",
+                            "operations_json": json.dumps(
+                                {
+                                    **operations.snapshot(),
+                                    "setup": setup_operations.snapshot(),
+                                },
+                                ensure_ascii=False,
+                            ),
                         }
                         successes += 1
                         print(f"Question ID: {question_id}")
@@ -588,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
                             print(citation_text)
                         print()
                     except Exception as exc:
+                        operations.finish_request(False, "kotaemon_run")
                         failures += 1
                         row = {
                             **{key: _csv_value(value) for key, value in record.items()},
@@ -595,10 +678,38 @@ def main(argv: list[str] | None = None) -> int:
                             "citations": "",
                             "status": "failed",
                             "error": str(exc),
+                            "operations_json": json.dumps(
+                                {
+                                    **operations.snapshot(),
+                                    "setup": setup_operations.snapshot(),
+                                },
+                                ensure_ascii=False,
+                            ),
                         }
                         print(f"[{question_id}] Error: {exc}", file=sys.stderr)
                     writer.writerow(row)
                     output_file.flush()
+                    operation_results.append(
+                        {
+                            "status": (
+                                "complete"
+                                if operations._request_status == "complete"
+                                else "failed"
+                            ),
+                            "operations": {
+                                **operations.snapshot(),
+                                "setup": setup_operations.snapshot(),
+                            },
+                            "failed_stage": operations._failed_stage,
+                        }
+                    )
+            print(
+                "Operational batch summary: "
+                + json.dumps(
+                    build_batch_operations_summary(operation_results),
+                    ensure_ascii=False,
+                )
+            )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

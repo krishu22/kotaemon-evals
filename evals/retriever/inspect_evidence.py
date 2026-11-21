@@ -23,6 +23,7 @@ from scripts.run_rag_eval import (
     _seed_isolated_database,
     _set_isolated_runtime_paths,
 )
+from evals.operations import OperationsRecorder, instrument_openai_calls
 
 
 TOKENIZER_MODEL = "gpt-3.5-turbo"
@@ -31,9 +32,7 @@ TOKENIZER_ID = f"tiktoken/{TOKENIZER.name} ({TOKENIZER_MODEL})"
 
 
 def _token_count(text: str) -> int:
-    tokens = TOKENIZER.encode(
-        text, allowed_special=set(), disallowed_special="all"
-    )
+    tokens = TOKENIZER.encode(text, allowed_special=set(), disallowed_special="all")
     return len(tokens)
 
 
@@ -62,9 +61,7 @@ def _context_candidates(doc: Any) -> list[tuple[str, str]]:
         if isinstance(caption, str):
             candidates.append(("escaped image caption", html.escape(caption)))
     elif isinstance(metadata.get("window"), str):
-        candidates.append(
-            ("metadata.window", metadata["window"].replace("\n", " "))
-        )
+        candidates.append(("metadata.window", metadata["window"].replace("\n", " ")))
     else:
         candidates.append(("text", doc_text.replace("\n", " ")))
 
@@ -193,9 +190,7 @@ def _build_dump(
                     "page": metadata.get("page_label"),
                 },
                 "character_count": len(text) if text is not None else None,
-                "token_count": (
-                    _token_count(text) if text is not None else None
-                ),
+                "token_count": (_token_count(text) if text is not None else None),
                 "tokenizer": TOKENIZER_ID,
                 "retrieval_score": (
                     {
@@ -243,8 +238,11 @@ def _build_dump(
 
 @contextmanager
 def evidence_capture_session(
-    docs_dir: Path, user_id: str | None = None
-) -> Generator[Callable[[str, str], dict[str, Any]], None, None]:
+    docs_dir: Path,
+    user_id: str | None = None,
+    operations: OperationsRecorder | None = None,
+) -> Generator[Callable[..., dict[str, Any]], None, None]:
+    setup_operations = operations or OperationsRecorder()
     from theflow.settings import settings
 
     saved_tables, saved_settings, saved_index = _read_saved_app_config(
@@ -252,9 +250,7 @@ def evidence_capture_session(
         user_id,
         getattr(settings, "KH_FEATURE_USER_MANAGEMENT", False),
     )
-    with tempfile.TemporaryDirectory(
-        prefix="kotaemon-evidence-inspect-"
-    ) as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="kotaemon-evidence-inspect-") as temp_dir:
         runtime_data = Path(temp_dir)
         _set_isolated_runtime_paths(settings, runtime_data)
         db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
@@ -279,25 +275,43 @@ def evidence_capture_session(
                 )
             )
 
-        answer_question = _prepare_question_runner(
-            docs_dir,
-            saved_settings,
-            saved_index,
-            evidence_callback=save_evidence,
-        )
+        with instrument_openai_calls(), setup_operations.activate("indexing"):
+            answer_question = _prepare_question_runner(
+                docs_dir,
+                saved_settings,
+                saved_index,
+                evidence_callback=save_evidence,
+                operations=setup_operations,
+            )
 
-        def capture_question(question_id: str, question: str) -> dict[str, Any]:
+        def capture_question(
+            question_id: str,
+            question: str,
+            question_operations: OperationsRecorder | None = None,
+        ) -> dict[str, Any]:
+            active_operations = question_operations or setup_operations
             current_question.update(id=question_id, question=question)
             capture.clear()
             try:
-                answer_question(question)
+                with (
+                    instrument_openai_calls(),
+                    active_operations.activate("application"),
+                ):
+                    answer_question(question)
             except EvidenceCaptured:
                 if not capture:
                     raise RuntimeError(
                         "Kotaemon stopped at evidence capture without producing "
                         "an evidence dump."
                     )
+                active_operations.finish_request(True)
+                capture["operations"] = active_operations.snapshot()
+                capture["operations"]["setup"] = setup_operations.snapshot()
                 return dict(capture)
+            except Exception:
+                active_operations.finish_request(False, "retrieval")
+                raise
+            active_operations.finish_request(False, "retrieval")
             raise RuntimeError(
                 "The reasoning pipeline finished without stopping at the "
                 "pre-generation evidence capture point."
@@ -309,9 +323,7 @@ def evidence_capture_session(
 def main(argv: list[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(
-        description=(
-            "Inspect evidence selected by Kotaemon before answer generation."
-        )
+        description=("Inspect evidence selected by Kotaemon before answer generation.")
     )
     parser.add_argument(
         "--dataset",
@@ -334,14 +346,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    dataset = (
-        args.dataset
-        if args.dataset.is_absolute()
-        else Path.cwd() / args.dataset
-    )
-    output_path = (
-        args.output if args.output.is_absolute() else Path.cwd() / args.output
-    )
+    dataset = args.dataset if args.dataset.is_absolute() else Path.cwd() / args.dataset
+    output_path = args.output if args.output.is_absolute() else Path.cwd() / args.output
     try:
         record = _load_question(dataset, args.question_id)
         question_id = record["id"]

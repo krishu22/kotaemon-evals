@@ -11,6 +11,7 @@ from kotaemon.llms import PromptTemplate
 
 from .citation_qa import CITATION_TIMEOUT, MAX_IMAGES, AnswerWithContextPipeline
 from .format_context import EVIDENCE_MODE_FIGURE
+from .role import build_answer_system_prompt
 from .utils import find_start_end_phrase
 
 DEFAULT_QA_CITATION_PROMPT = """
@@ -224,9 +225,9 @@ class AnswerWithInlineCitation(AnswerWithContextPipeline):
                 mindmap_thread = threading.Thread(target=mindmap_call)
                 mindmap_thread.start()
 
-        messages = []
-        if self.system_prompt:
-            messages.append(SystemMessage(content=self.system_prompt))
+        messages = [
+            SystemMessage(content=build_answer_system_prompt(self.system_prompt))
+        ]
 
         for human, ai in history[-self.n_last_interactions :]:
             messages.append(HumanMessage(content=human))

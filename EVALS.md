@@ -88,6 +88,52 @@ writes one generator result per question, and saves a `summary.json` with
 per-question statuses and scores plus mean scores over completed evaluations.
 Failures are retained in each question's result and do not stop the batch.
 
+## Evaluating answer safety
+
+The safety evaluator runs one golden question through Kotaemon and scores the
+generated answer with DeepEval's toxicity and bias metrics:
+
+```bash
+python -m evals.application.run_safety_eval \
+  --question-id RLPM-39 \
+  --output-dir results/output/application/safety_smoke
+```
+
+The metrics use `gpt-4o-mini`, with lower scores indicating less detected
+toxicity or bias; scores at or below each metric's threshold pass. The result
+JSON is saved before scoring and after each completed metric.
+
+## Evaluating answer style
+
+The style evaluator runs one golden question through Kotaemon, captures the
+context supplied to the generator, and asks `gpt-4o-mini` to score clarity,
+conciseness, organization, and uncertainty expression from 1 to 5:
+
+```bash
+python -m evals.application.run_style_eval \
+  --question-id RLPM-39 \
+  --output-dir results/output/application/style_smoke
+```
+
+The structured result includes the answer, generator context, available golden
+references, dimension scores, reasons, and specific issues. The answer is saved
+before the style judge is called.
+
+## Evaluating assistant role adherence
+
+The Kotaemon answer-generation prompt includes the shared MEDA research
+assistant role. Evaluate a single generated answer against that role with:
+
+```bash
+python -m evals.application.run_role_eval \
+  --question-id RLPM-39 \
+  --output-dir results/output/application/role_smoke
+```
+
+The role evaluation considers observable adherence separately from factual
+correctness and faithfulness, and saves the answer and actual generator context
+before judging.
+
 ## Inspecting retrieved evidence
 
 From the repository root with the project virtual environment active, inspect
