@@ -24,6 +24,11 @@ from evals.application.run_eval import (
     _validate_pipeline_result,
     _write_json,
 )
+from evals.operations import (
+    OperationsRecorder,
+    build_batch_operations_summary,
+    instrument_openai_calls,
+)
 
 
 CLAIM_EXTRACTION_PROMPT = """\
@@ -273,6 +278,8 @@ def _evaluate(
         "status": "pending",
         "result_path": str(output_path),
     }
+    operations = OperationsRecorder()
+    result["operations"] = operations.snapshot()
 
     api_key = ""
     stage = "load_question"
@@ -303,30 +310,39 @@ def _evaluate(
                 else None
             ),
         )
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
         result["completed_stages"].append("load_pipeline_result")
         _write_json(output_path, result)
 
         stage = "judge_setup"
         api_key = config("OPENAI_API_KEY", default="").strip()
         client = _create_openai_client()
+        operations.start_evaluation()
         result["completed_stages"].append("judge_setup")
 
         stage = "extract_claims"
-        claims = _request_claims(client, JUDGE_MODEL, record["question"], answer)
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            claims = _request_claims(client, JUDGE_MODEL, record["question"], answer)
         claim_items = [
             {"claim_id": f"{question_id}-G{index:02d}", "claim": claim}
             for index, claim in enumerate(claims, start=1)
         ]
         result["extracted_claims"] = claim_items
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
         result["completed_stages"].append(stage)
         _write_json(output_path, result)
 
         stage = "reference_support"
-        support = (
-            _request_support(client, JUDGE_MODEL, record["golden_answer"], claim_items)
-            if claim_items
-            else []
-        )
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            support = (
+                _request_support(
+                    client, JUDGE_MODEL, record["golden_answer"], claim_items
+                )
+                if claim_items
+                else []
+            )
         support_by_id = {item.claim_id: item for item in support}
         for claim in result["extracted_claims"]:
             support_item = support_by_id[claim["claim_id"]]
@@ -347,20 +363,23 @@ def _evaluate(
             ),
         }
         result["completed_stages"].append(stage)
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
         _write_json(output_path, result)
 
         stage = "answer_relevance"
-        relevance = (
-            _request_relevance(
-                client,
-                JUDGE_MODEL,
-                record["question"],
-                record.get("required_points"),
-                claim_items,
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            relevance = (
+                _request_relevance(
+                    client,
+                    JUDGE_MODEL,
+                    record["question"],
+                    record.get("required_points"),
+                    claim_items,
+                )
+                if claim_items
+                else []
             )
-            if claim_items
-            else []
-        )
         relevance_by_id = {item.claim_id: item for item in relevance}
         for claim in result["extracted_claims"]:
             relevance_item = relevance_by_id[claim["claim_id"]]
@@ -380,10 +399,13 @@ def _evaluate(
             ),
         }
         result["completed_stages"].append(stage)
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
         _write_json(output_path, result)
 
         stage = "completeness"
-        requirements = _request_completeness(client, record, answer)
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            requirements = _request_completeness(client, record, answer)
         met_count = sum(item["verdict"] == "met" for item in requirements)
         partial_requirements = [
             item for item in requirements if item["verdict"] == "partial"
@@ -399,12 +421,21 @@ def _evaluate(
             "partial_requirements": partial_requirements,
         }
         result["completed_stages"].append(stage)
+        operations.finish_evaluation()
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
         result["status"] = "complete"
+        operations.measure_serialization(result)
         _write_json(output_path, result)
     except Exception as exc:
+        operations.finish_evaluation()
         result["status"] = "failed"
         result["failed_stage"] = stage
         result["sanitized_error"] = _sanitize_error(exc, api_key)
+        result["operations"] = operations.snapshot()
+        if "pipeline_data" in locals():
+            result["operations"]["originating_run"] = pipeline_data.get("operations")
+        operations.measure_serialization(result)
         try:
             _write_json(output_path, result)
         except OSError as save_exc:
@@ -470,6 +501,10 @@ def _write_discovery_failure(
         "failed_stage": "discovery",
         "sanitized_error": message,
         "result_path": str(path),
+        "operations": {
+            **OperationsRecorder().snapshot(),
+            "requests": {"status": "not_started", "failed_stage": "discovery"},
+        },
     }
     _write_json(path, result)
     print(f"[{question_id}] Error (discovery): {message}", file=sys.stderr)
@@ -500,6 +535,7 @@ def _build_batch_summary(
         "failed_count": sum(item["status"] != "complete" for item in results)
         + len(discovery_errors),
         "metrics": metrics,
+        "operations": build_batch_operations_summary(results),
         "results": [
             {
                 "question_id": item["question_id"],
