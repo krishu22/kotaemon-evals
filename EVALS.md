@@ -68,6 +68,26 @@ counts, and correctness and completeness means with the number of questions
 contributing to each. Failed questions do not stop the rest of the batch; the
 process exits nonzero if any question fails.
 
+## Evaluating generated answers
+
+The generator evaluator extracts factual claims from saved pipeline answers,
+then independently judges reference support and answer relevance. It also
+reports completeness using the application evaluator's requirements. Run it on
+one saved result with `--question-id` and `--result`, or on a directory of saved
+results with `--results-dir`:
+
+```bash
+python -m evals.generator.run_eval \
+  --results-dir results/pipeline/rlpm_batch_smoke \
+  --output-dir results/output/generator/rlpm_batch_smoke
+```
+
+Pass `--question-ids ID [ID ...]` to select results; omit it to evaluate every
+saved pipeline result in the directory. Batch mode skips summary JSON files,
+writes one generator result per question, and saves a `summary.json` with
+per-question statuses and scores plus mean scores over completed evaluations.
+Failures are retained in each question's result and do not stop the batch.
+
 ## Inspecting retrieved evidence
 
 From the repository root with the project virtual environment active, inspect
