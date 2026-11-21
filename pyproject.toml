@@ -19,6 +19,7 @@ requires-python = ">= 3.10"
 description = "Kotaemon App"
 dependencies = [
     "deepeval>=2.5.0,<2.6",
+    "langsmith==0.1.147",
     "kotaemon[all]",
     "ktem",
 ]

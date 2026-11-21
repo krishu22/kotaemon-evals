@@ -339,6 +339,7 @@ def _prepare_question_runner(
         [list[Any], Any, list[Any], int], None
     ] | None = None,
     stop_after_evidence: bool = True,
+    pipeline_callback: Callable[[Any], None] | None = None,
 ) -> Callable[[str], tuple[str, str]]:
     from theflow.settings import settings
     from theflow.utils.modules import import_dotted_string
@@ -458,6 +459,8 @@ def _prepare_question_runner(
                 retrievers=retrievers,
                 stop_after_evidence=stop_after_evidence,
             )
+        if pipeline_callback is not None:
+            pipeline_callback(pipeline)
         answer = ""
         citations = ""
         for response in pipeline.stream(question, uuid.uuid4().hex, []):

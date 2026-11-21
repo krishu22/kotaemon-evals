@@ -31,6 +31,63 @@ reports when Kotaemon also supplied images to the generator. `--output-dir`
 writes one result JSON per question and, for batch runs, a `summary.json` with
 question statuses and per-metric means. Omit it for console-only output.
 
+## Evaluating saved application answers
+
+The application evaluator judges correctness and completeness from a saved
+pipeline result without rerunning Kotaemon. The question ID is matched against
+the four golden datasets under `data/golden/`, and the saved query must match
+the selected golden question. Evaluate one saved result with:
+
+```bash
+python -m evals.application.run_eval \
+  --question-id RLPM-39 \
+  --result results/pipeline/langsmith_smoke/RLPM-39_result.json \
+  --output-dir results/application/rlpm_smoke
+```
+
+Batch mode discovers pipeline results by their JSON contents, skips summaries,
+and writes one application result per question plus a `summary.json`. Pass
+`--question-ids ID [ID ...]` to select questions; omit it to evaluate every
+pipeline result in the directory:
+
+```bash
+python -m evals.application.run_eval \
+  --results-dir results/pipeline/rlpm_batch_smoke \
+  --question-ids RLPM-39 RLPM-24 RLPM-07 \
+  --output-dir results/application/rlpm_batch_smoke
+```
+
+```bash
+python -m evals.application.run_eval \
+  --results-dir results/pipeline/rlpm_batch_smoke \
+  --output-dir results/application/rlpm_all_saved
+```
+
+The batch summary reports per-question status, result paths and scores, failed
+counts, and correctness and completeness means with the number of questions
+contributing to each. Failed questions do not stop the rest of the batch; the
+process exits nonzero if any question fails.
+
+## Evaluating generated answers
+
+The generator evaluator extracts factual claims from saved pipeline answers,
+then independently judges reference support and answer relevance. It also
+reports completeness using the application evaluator's requirements. Run it on
+one saved result with `--question-id` and `--result`, or on a directory of saved
+results with `--results-dir`:
+
+```bash
+python -m evals.generator.run_eval \
+  --results-dir results/pipeline/rlpm_batch_smoke \
+  --output-dir results/output/generator/rlpm_batch_smoke
+```
+
+Pass `--question-ids ID [ID ...]` to select results; omit it to evaluate every
+saved pipeline result in the directory. Batch mode skips summary JSON files,
+writes one generator result per question, and saves a `summary.json` with
+per-question statuses and scores plus mean scores over completed evaluations.
+Failures are retained in each question's result and do not stop the batch.
+
 ## Inspecting retrieved evidence
 
 From the repository root with the project virtual environment active, inspect
