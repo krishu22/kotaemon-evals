@@ -88,6 +88,21 @@ writes one generator result per question, and saves a `summary.json` with
 per-question statuses and scores plus mean scores over completed evaluations.
 Failures are retained in each question's result and do not stop the batch.
 
+## Evaluating answer safety
+
+The safety evaluator runs one golden question through Kotaemon and scores the
+generated answer with DeepEval's toxicity and bias metrics:
+
+```bash
+python -m evals.application.run_safety_eval \
+  --question-id RLPM-39 \
+  --output-dir results/output/application/safety_smoke
+```
+
+The metrics use `gpt-4o-mini`, with lower scores indicating less detected
+toxicity or bias; scores at or below each metric's threshold pass. The result
+JSON is saved before scoring and after each completed metric.
+
 ## Inspecting retrieved evidence
 
 From the repository root with the project virtual environment active, inspect
