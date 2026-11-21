@@ -15,6 +15,11 @@ from typing import Any, Literal
 from decouple import config
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
+from evals.operations import (
+    OperationsRecorder,
+    build_batch_operations_summary,
+    instrument_openai_calls,
+)
 
 
 JUDGE_MODEL = "gpt-4o-mini"
@@ -140,15 +145,12 @@ def _create_openai_client() -> OpenAI:
     if not api_key or api_key == "<YOUR_OPENAI_KEY>":
         raise ValueError("OPENAI_API_KEY is not configured in the environment or .env")
     base_url = (
-        config("OPENAI_API_BASE", default="").strip()
-        or "https://api.openai.com/v1"
+        config("OPENAI_API_BASE", default="").strip() or "https://api.openai.com/v1"
     )
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
-def _find_question(
-    repo_root: Path, question_id: str
-) -> tuple[dict[str, Any], Path]:
+def _find_question(repo_root: Path, question_id: str) -> tuple[dict[str, Any], Path]:
     matches: list[tuple[dict[str, Any], Path]] = []
     golden_dir = repo_root / "data" / "golden"
     for filename in GOLDEN_FILENAMES:
@@ -277,7 +279,9 @@ def _validate_requirements(
     question_id: str, output: CompletenessOutput
 ) -> list[dict[str, Any]]:
     if not output.requirements:
-        raise ValueError(f"Completeness judge returned no requirements for {question_id}")
+        raise ValueError(
+            f"Completeness judge returned no requirements for {question_id}"
+        )
 
     seen: set[str] = set()
     validated: list[dict[str, Any]] = []
@@ -393,6 +397,8 @@ def _evaluate_saved_result(
         "completeness_score": None,
         "status": "pending",
     }
+    operations = OperationsRecorder()
+    result["operations"] = operations.snapshot()
 
     api_key = ""
     stage = "load_question"
@@ -421,19 +427,23 @@ def _evaluate_saved_result(
             ),
             pipeline_status=pipeline_data.get("status"),
         )
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
         _write_json(output_path, result)
 
         stage = "judge_setup"
         api_key = config("OPENAI_API_KEY", default="").strip()
         client = _create_openai_client()
+        operations.start_evaluation()
 
         stage = "correctness"
-        correctness = _request_correctness(
-            client,
-            record,
-            answer,
-            pipeline_data.get("retrieval_context"),
-        )
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            correctness = _request_correctness(
+                client,
+                record,
+                answer,
+                pipeline_data.get("retrieval_context"),
+            )
         if (
             correctness.verdict == "partially_correct"
             and not correctness.factual_errors
@@ -452,10 +462,13 @@ def _evaluate_saved_result(
             ],
         }
         result["correctness_score"] = correctness_score
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
         _write_json(output_path, result)
 
         stage = "completeness"
-        requirements = _request_completeness(client, record, answer)
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            requirements = _request_completeness(client, record, answer)
         met_count = sum(item["verdict"] == "met" for item in requirements)
         partial = [item for item in requirements if item["verdict"] == "partial"]
         completeness_score = met_count / len(requirements)
@@ -463,14 +476,16 @@ def _evaluate_saved_result(
             "requirements": requirements,
             "met_count": met_count,
             "partial_count": len(partial),
-            "unmet_count": sum(
-                item["verdict"] == "unmet" for item in requirements
-            ),
+            "unmet_count": sum(item["verdict"] == "unmet" for item in requirements),
             "total_requirements": len(requirements),
             "partial_requirements": partial,
         }
         result["completeness_score"] = completeness_score
         result["status"] = "complete"
+        operations.finish_evaluation()
+        result["operations"] = operations.snapshot()
+        result["operations"]["originating_run"] = pipeline_data.get("operations")
+        operations.measure_serialization(result)
         _write_json(output_path, result)
         print(
             f"[{question_id}] correctness={correctness.verdict} "
@@ -478,9 +493,14 @@ def _evaluate_saved_result(
             f"({met_count}/{len(requirements)} met)"
         )
     except Exception as exc:
+        operations.finish_evaluation()
         result["status"] = "failed"
         result["failed_stage"] = stage
         result["sanitized_error"] = _sanitize_error(exc, api_key)
+        result["operations"] = operations.snapshot()
+        if "pipeline_data" in locals():
+            result["operations"]["originating_run"] = pipeline_data.get("operations")
+        operations.measure_serialization(result)
         try:
             _write_json(output_path, result)
         except OSError as save_exc:
@@ -551,6 +571,10 @@ def _write_discovery_failure(
         "failed_stage": "discovery",
         "sanitized_error": message,
         "result_path": str(path),
+        "operations": {
+            **OperationsRecorder().snapshot(),
+            "requests": {"status": "failed", "failed_stage": "discovery"},
+        },
     }
     _write_json(path, result)
     print(f"[{question_id}] Error (discovery): {message}", file=sys.stderr)
@@ -581,6 +605,7 @@ def _build_batch_summary(
         "failed_count": sum(item["status"] != "complete" for item in results)
         + len(discovery_errors),
         "metrics": metrics,
+        "operations": build_batch_operations_summary(results),
         "results": [
             {
                 "question_id": item["question_id"],
@@ -642,27 +667,21 @@ def _run_batch(
                 f"No pipeline result found for requested question ID "
                 f"{question_id!r} in {results_dir}"
             )
-            evaluated.append(
-                _write_discovery_failure(output_dir, question_id, message)
-            )
+            evaluated.append(_write_discovery_failure(output_dir, question_id, message))
             continue
         if len(paths) > 1:
             message = (
                 f"Duplicate pipeline results for question ID {question_id!r}: "
                 + ", ".join(str(path) for path in paths)
             )
-            evaluated.append(
-                _write_discovery_failure(output_dir, question_id, message)
-            )
+            evaluated.append(_write_discovery_failure(output_dir, question_id, message))
             continue
         evaluated.append(
             _evaluate_saved_result(repo_root, question_id, paths[0], output_dir)
         )
 
     if not evaluated and not discovery_errors:
-        discovery_errors.append(
-            f"No pipeline result JSON files found in {results_dir}"
-        )
+        discovery_errors.append(f"No pipeline result JSON files found in {results_dir}")
         print(f"Error: {discovery_errors[-1]}", file=sys.stderr)
     for error in discovery_errors:
         print(f"Error: {error}", file=sys.stderr)
@@ -695,7 +714,9 @@ def main(argv: list[str] | None = None) -> int:
     single_mode = args.question_id is not None or args.result is not None
     batch_mode = args.results_dir is not None or args.question_ids is not None
     if single_mode and batch_mode:
-        parser.error("Use either --question-id/--result or --results-dir/--question-ids")
+        parser.error(
+            "Use either --question-id/--result or --results-dir/--question-ids"
+        )
     if single_mode and (args.question_id is None or args.result is None):
         parser.error("--question-id and --result must be supplied together")
     if not single_mode and args.results_dir is None:
@@ -724,9 +745,7 @@ def main(argv: list[str] | None = None) -> int:
     pipeline_path = (
         args.result if args.result.is_absolute() else Path.cwd() / args.result
     )
-    result = _evaluate_saved_result(
-        repo_root, question_id, pipeline_path, output_dir
-    )
+    result = _evaluate_saved_result(repo_root, question_id, pipeline_path, output_dir)
     print(f"JSON result: {result['result_path']}")
     return 0 if result["status"] == "complete" else 1
 

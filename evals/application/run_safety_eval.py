@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.application.run_eval import _find_question, _write_json
+from evals.operations import OperationsRecorder, instrument_openai_calls
 from evals.pipeline.run_eval import (
     JUDGE_MODEL,
     _create_judge_model,
@@ -67,6 +68,8 @@ def _evaluate(
         "status": "pending",
         "result_path": str(output_path),
     }
+    operations = OperationsRecorder()
+    result["operations"] = operations.snapshot()
 
     api_key = ""
     stage = "load_question"
@@ -99,25 +102,32 @@ def _evaluate(
             _set_isolated_runtime_paths(settings, runtime_data)
             db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
             _seed_isolated_database(db_path, saved_tables, saved_settings)
-            answer_question = _prepare_question_runner(
-                docs_dir,
-                saved_settings,
-                saved_index,
-                stop_after_evidence=False,
-            )
+            with instrument_openai_calls(), operations.activate("indexing"):
+                answer_question = _prepare_question_runner(
+                    docs_dir,
+                    saved_settings,
+                    saved_index,
+                    stop_after_evidence=False,
+                    operations=operations,
+                )
             result["completed_stages"].append(stage)
 
-            answer, citations = answer_question(record["question"])
+            with instrument_openai_calls(), operations.activate("application"):
+                answer, citations = answer_question(record["question"])
             _ = citations
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("Kotaemon generated an empty answer")
+            operations.finish_request(True)
             result["generated_answer"] = answer.strip()
             result["completed_stages"].append(stage)
             result["status"] = "pending_scoring"
+            result["operations"] = operations.snapshot()
             _write_json(output_path, result)
 
         stage = "judge_setup"
-        judge_model = _create_judge_model()
+        operations.start_evaluation()
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            judge_model = _create_judge_model()
         from deepeval.metrics import BiasMetric, ToxicityMetric
         from deepeval.test_case import LLMTestCase
 
@@ -132,31 +142,40 @@ def _evaluate(
         result["completed_stages"].append(stage)
         _write_json(output_path, result)
 
-        for metric_name, metric_type in metrics:
-            stage = f"scoring:{metric_name}"
-            metric = metric_type(
-                threshold=DEFAULT_THRESHOLD,
-                model=judge_model,
-                async_mode=False,
-            )
-            metric.measure(test_case)
-            score = metric.score
-            if hasattr(score, "item"):
-                score = score.item()
-            result["metrics"][metric_name].update(
-                score=float(score),
-                reason=metric.reason,
-                threshold=float(metric.threshold),
-                score_direction="lower_is_better",
-                passed=bool(metric.is_successful()),
-                status="complete",
-            )
-            result["completed_stages"].append(stage)
-            _write_json(output_path, result)
+        try:
+            with instrument_openai_calls(), operations.activate("evaluation"):
+                for metric_name, metric_type in metrics:
+                    stage = f"scoring:{metric_name}"
+                    metric = metric_type(
+                        threshold=DEFAULT_THRESHOLD,
+                        model=judge_model,
+                        async_mode=False,
+                    )
+                    metric.measure(test_case)
+                    score = metric.score
+                    if hasattr(score, "item"):
+                        score = score.item()
+                    result["metrics"][metric_name].update(
+                        score=float(score),
+                        reason=metric.reason,
+                        threshold=float(metric.threshold),
+                        score_direction="lower_is_better",
+                        passed=bool(metric.is_successful()),
+                        status="complete",
+                    )
+                    result["completed_stages"].append(stage)
+                    result["operations"] = operations.snapshot()
+                    _write_json(output_path, result)
+        finally:
+            operations.finish_evaluation()
 
         result["status"] = "complete"
+        result["operations"] = operations.snapshot()
+        operations.measure_serialization(result)
         _write_json(output_path, result)
     except Exception as exc:
+        operations.finish_request(False, stage)
+        operations.finish_evaluation()
         if stage.startswith("scoring:"):
             metric_name = stage.partition(":")[2]
             result["metrics"][metric_name].update(
@@ -166,6 +185,8 @@ def _evaluate(
         result["status"] = "failed"
         result["failed_stage"] = stage
         result["sanitized_error"] = _sanitize_error(exc, api_key)
+        result["operations"] = operations.snapshot()
+        operations.measure_serialization(result)
         try:
             _write_json(output_path, result)
         except OSError as save_exc:

@@ -23,6 +23,7 @@ from evals.application.run_eval import (
     _sanitize_error,
     _write_json,
 )
+from evals.operations import OperationsRecorder, instrument_openai_calls
 from scripts.run_rag_eval import (
     _prepare_question_runner,
     _read_saved_app_config,
@@ -191,6 +192,8 @@ def _evaluate(
         "status": "pending",
         "result_path": str(output_path),
     }
+    operations = OperationsRecorder()
+    result["operations"] = operations.snapshot()
 
     api_key = ""
     stage = "load_question"
@@ -224,28 +227,32 @@ def _evaluate(
             _set_isolated_runtime_paths(settings, runtime_data)
             db_path = Path(settings.KH_DATABASE.removeprefix("sqlite:///"))
             _seed_isolated_database(db_path, saved_tables, saved_settings)
-            answer_question = _prepare_question_runner(
-                docs_dir,
-                saved_settings,
-                saved_index,
-                evidence_callback=lambda docs, prepared, retrievers, context_limit: (
-                    _capture_context(
-                        docs,
-                        prepared,
-                        retrievers,
-                        context_limit,
-                        capture_target,
-                    )
-                ),
-                stop_after_evidence=False,
-            )
+            with instrument_openai_calls(), operations.activate("indexing"):
+                answer_question = _prepare_question_runner(
+                    docs_dir,
+                    saved_settings,
+                    saved_index,
+                    evidence_callback=lambda docs, prepared, retrievers, context_limit: (
+                        _capture_context(
+                            docs,
+                            prepared,
+                            retrievers,
+                            context_limit,
+                            capture_target,
+                        )
+                    ),
+                    stop_after_evidence=False,
+                    operations=operations,
+                )
             result["completed_stages"].append(stage)
 
             stage = "kotaemon_generation"
-            answer, citations = answer_question(record["question"])
+            with instrument_openai_calls(), operations.activate("application"):
+                answer, citations = answer_question(record["question"])
             _ = citations
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("Kotaemon generated an empty answer")
+            operations.finish_request(True)
             if "final_context" not in capture_target:
                 raise RuntimeError(
                     "Kotaemon completed without capturing the context supplied "
@@ -258,29 +265,42 @@ def _evaluate(
             )
             result["completed_stages"].append(stage)
             result["status"] = "pending_judging"
+            result["operations"] = operations.snapshot()
             _write_json(output_path, result)
 
         stage = "judge_setup"
-        client = _create_openai_client()
+        operations.start_evaluation()
+        with instrument_openai_calls(), operations.activate("evaluation"):
+            client = _create_openai_client()
         result["completed_stages"].append(stage)
         _write_json(output_path, result)
 
         stage = "style_judgment"
-        evaluation = _request_style_evaluation(
-            client,
-            record["question"],
-            result["generated_answer"],
-            result["retrieval_context"],
-            result["references"],
-        )
+        try:
+            with instrument_openai_calls(), operations.activate("evaluation"):
+                evaluation = _request_style_evaluation(
+                    client,
+                    record["question"],
+                    result["generated_answer"],
+                    result["retrieval_context"],
+                    result["references"],
+                )
+        finally:
+            operations.finish_evaluation()
         result["style"] = evaluation.model_dump()
         result["completed_stages"].append(stage)
         result["status"] = "complete"
+        result["operations"] = operations.snapshot()
+        operations.measure_serialization(result)
         _write_json(output_path, result)
     except Exception as exc:
+        operations.finish_request(False, stage)
+        operations.finish_evaluation()
         result["status"] = "failed"
         result["failed_stage"] = stage
         result["sanitized_error"] = _sanitize_error(exc, api_key)
+        result["operations"] = operations.snapshot()
+        operations.measure_serialization(result)
         try:
             _write_json(output_path, result)
         except OSError as save_exc:
