@@ -19,6 +19,7 @@ from scripts.run_rag_eval import (
     _load_dataset_records,
     _validate_question_record,
 )
+from evals.operations import OperationsRecorder, instrument_openai_calls
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -65,13 +66,8 @@ class ClaimExtraction(BaseModel):
 def _create_openai_client() -> OpenAI:
     api_key = config("OPENAI_API_KEY", default="")
     if not api_key or api_key == "<YOUR_OPENAI_KEY>":
-        raise ValueError(
-            "OPENAI_API_KEY is not configured in the environment or .env"
-        )
-    base_url = (
-        config("OPENAI_API_BASE", default="")
-        or "https://api.openai.com/v1"
-    )
+        raise ValueError("OPENAI_API_KEY is not configured in the environment or .env")
+    base_url = config("OPENAI_API_BASE", default="") or "https://api.openai.com/v1"
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
@@ -122,27 +118,17 @@ def _load_selected_records(
             _validate_question_record(record, dataset)
             found[question_id] = record
 
-    missing = [
-        question_id for question_id in question_ids if question_id not in found
-    ]
+    missing = [question_id for question_id in question_ids if question_id not in found]
     if missing:
-        raise ValueError(
-            f"Question ID(s) not found in {dataset}: {', '.join(missing)}"
-        )
+        raise ValueError(f"Question ID(s) not found in {dataset}: {', '.join(missing)}")
     return records, [found[question_id] for question_id in question_ids]
 
 
-def _request_claims(
-    client: OpenAI, model: str, record: dict[str, Any]
-) -> list[str]:
-    question_id, question = _validate_question_record(
-        record, Path("<dataset>")
-    )
+def _request_claims(client: OpenAI, model: str, record: dict[str, Any]) -> list[str]:
+    question_id, question = _validate_question_record(record, Path("<dataset>"))
     golden_answer = record.get("golden_answer")
     if not isinstance(golden_answer, str) or not golden_answer.strip():
-        raise ValueError(
-            f"Question {question_id} has no non-empty golden_answer"
-        )
+        raise ValueError(f"Question {question_id} has no non-empty golden_answer")
 
     user_input = {
         "question": question,
@@ -152,8 +138,7 @@ def _request_claims(
     if required_points is not None:
         if not isinstance(required_points, str):
             raise ValueError(
-                f"required_points for {question_id} must be a string "
-                "when present"
+                f"required_points for {question_id} must be a string " "when present"
             )
         user_input["required_points"] = required_points
 
@@ -170,9 +155,7 @@ def _request_claims(
         temperature=0,
     )
     if not response.choices:
-        raise ValueError(
-            f"OpenAI returned no choices for question {question_id}"
-        )
+        raise ValueError(f"OpenAI returned no choices for question {question_id}")
     message = response.choices[0].message
     if message.refusal:
         raise ValueError(f"OpenAI refused claim extraction for {question_id}")
@@ -183,9 +166,7 @@ def _request_claims(
     return _validate_claims(message.parsed.claims, question_id)
 
 
-def _preview_record(
-    question_id: str, question: str, claims: list[str]
-) -> dict:
+def _preview_record(question_id: str, question: str, claims: list[str]) -> dict:
     return {
         "question_id": question_id,
         "question": question,
@@ -206,9 +187,7 @@ def _make_preview(
         "model": model,
         "records": [
             _preview_record(record["id"], record["question"], claims)
-            for record, claims in zip(
-                selected_records, claim_lists, strict=True
-            )
+            for record, claims in zip(selected_records, claim_lists, strict=True)
         ],
     }
 
@@ -219,21 +198,14 @@ def _validate_preview(
     try:
         preview = json.loads(preview_path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise ValueError(
-            f"Cannot read approved preview {preview_path}: {exc}"
-        ) from exc
+        raise ValueError(f"Cannot read approved preview {preview_path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"Approved preview is not valid JSON: {preview_path}: {exc}"
         ) from exc
 
-    if (
-        not isinstance(preview, dict)
-        or preview.get("version") != PREVIEW_VERSION
-    ):
-        raise ValueError(
-            "Approved preview has an unsupported or missing version"
-        )
+    if not isinstance(preview, dict) or preview.get("version") != PREVIEW_VERSION:
+        raise ValueError("Approved preview has an unsupported or missing version")
     if not isinstance(preview.get("model"), str) or not preview["model"]:
         raise ValueError("Approved preview must include a non-empty model")
     records = preview.get("records")
@@ -247,28 +219,18 @@ def _validate_preview(
         question_id = record.get("question_id")
         question = record.get("question")
         if not isinstance(question_id, str) or not question_id:
-            raise ValueError(
-                "Every approved preview record needs a question_id"
-            )
+            raise ValueError("Every approved preview record needs a question_id")
         if question_id in approved:
-            raise ValueError(
-                f"Duplicate question_id in preview: {question_id}"
-            )
+            raise ValueError(f"Duplicate question_id in preview: {question_id}")
         if not isinstance(question, str) or not question.strip():
-            raise ValueError(
-                f"Preview question for {question_id} must be non-empty"
-            )
+            raise ValueError(f"Preview question for {question_id} must be non-empty")
         claim_items = record.get("retrieval_claims")
         if not isinstance(claim_items, list):
-            raise ValueError(
-                f"retrieval_claims for {question_id} must be a JSON array"
-            )
+            raise ValueError(f"retrieval_claims for {question_id} must be a JSON array")
         claims = []
         for index, item in enumerate(claim_items, start=1):
             if not isinstance(item, dict):
-                raise ValueError(
-                    f"Every claim for {question_id} must be an object"
-                )
+                raise ValueError(f"Every claim for {question_id} must be an object")
             claim = item.get("claim")
             claim_id = item.get("id")
             expected_id = f"{question_id}-C{index:02d}"
@@ -279,9 +241,7 @@ def _validate_preview(
                 )
             claims.append(claim)
         validated_claims = _validate_claims(claims, question_id)
-        approved[question_id] = _preview_record(
-            question_id, question, validated_claims
-        )
+        approved[question_id] = _preview_record(question_id, question, validated_claims)
 
     if set(approved) != set(question_ids):
         missing = [item for item in question_ids if item not in approved]
@@ -330,9 +290,7 @@ def _apply_preview(
     approved_records: list[dict[str, Any]],
     overwrite: bool,
 ) -> None:
-    for record, approved in zip(
-        selected_records, approved_records, strict=True
-    ):
+    for record, approved in zip(selected_records, approved_records, strict=True):
         if record.get("question") != approved["question"]:
             raise ValueError(
                 f"Question text in preview no longer matches dataset for "
@@ -386,18 +344,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     dataset_path = (
-        args.dataset
-        if args.dataset.is_absolute()
-        else Path.cwd() / args.dataset
+        args.dataset if args.dataset.is_absolute() else Path.cwd() / args.dataset
     )
     question_ids = args.question_ids
 
     try:
         if args.apply_preview is not None:
             if args.preview_output is not None:
-                parser.error(
-                    "--apply-preview cannot be combined with --preview-output"
-                )
+                parser.error("--apply-preview cannot be combined with --preview-output")
             records, selected_records = _load_selected_records(
                 dataset_path, question_ids
             )
@@ -426,15 +380,27 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if args.overwrite:
                 parser.error("--overwrite is only valid with --apply-preview")
-            _, selected_records = _load_selected_records(
-                dataset_path, question_ids
-            )
+            _, selected_records = _load_selected_records(dataset_path, question_ids)
             client = _create_openai_client()
-            claim_lists = [
-                _request_claims(client, args.model, record)
-                for record in selected_records
-            ]
+            claim_lists = []
+            claim_operations = []
+            for record in selected_records:
+                operations = OperationsRecorder()
+                operations.start_evaluation()
+                try:
+                    with (
+                        instrument_openai_calls(),
+                        operations.activate("evaluation"),
+                    ):
+                        claim_lists.append(_request_claims(client, args.model, record))
+                finally:
+                    operations.finish_evaluation()
+                claim_operations.append(operations)
             output = _make_preview(args.model, selected_records, claim_lists)
+            for preview_record, operations in zip(
+                output["records"], claim_operations, strict=True
+            ):
+                preview_record["operations"] = operations.snapshot()
             if args.preview_output is not None:
                 preview_path = (
                     args.preview_output
@@ -443,11 +409,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if preview_path.resolve() == dataset_path.resolve():
                     raise ValueError(
-                        "Preview output path must not be the golden dataset "
-                        "path"
+                        "Preview output path must not be the golden dataset " "path"
                     )
-                _write_json_atomically(preview_path, output)
                 output["preview_path"] = str(preview_path)
+        if args.apply_preview is not None:
+            output["operations"] = OperationsRecorder().snapshot()
+        else:
+            output["operations"] = {
+                "per_question": [record["operations"] for record in output["records"]],
+                "source": "OpenAI SDK provider instrumentation",
+            }
+        if args.preview_output is not None and args.apply_preview is None:
+            _write_json_atomically(preview_path, output)
 
         print(json.dumps(output, ensure_ascii=False, indent=2))
     except (OSError, ValueError) as exc:
